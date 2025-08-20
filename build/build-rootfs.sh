@@ -51,6 +51,21 @@ apk --no-cache add alpine-keys
 # Now try to update package lists
 apk update
 
+# === DEBUGGING PACKAGE AVAILABILITY ===
+echo "=== DEBUGGING PACKAGE AVAILABILITY ==="
+apk search alpine-base || echo "alpine-base not found in search"
+apk search busybox || echo "busybox not found in search"
+apk info || echo "apk info failed"
+echo "Repository files:"
+cat /etc/apk/repositories
+echo "Cache directory:"
+ls -la /var/cache/apk/ || echo "cache dir not found"
+echo "APK database:"
+ls -la /lib/apk/db/ || echo "db dir not found"
+echo "Architecture:"
+uname -m
+echo "=== END DEBUG ==="
+
 # Install absolutely essential packages first
 apk add --no-cache alpine-base busybox
 
