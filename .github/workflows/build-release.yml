@@ -21,7 +21,7 @@ on:
         default: 'placeholder'
 
 env:
-  BUILD_ARCH: armhf
+  BUILD_ARCH: arm64
   ALPINE_VERSION: 3.18
 
 jobs:

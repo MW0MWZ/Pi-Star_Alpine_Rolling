@@ -34,7 +34,7 @@ echo "Using Alpine version: $ALPINE_VER"
 echo "Setting up basic Alpine chroot..."
 
 # Copy qemu static BEFORE doing anything else
-sudo cp /usr/bin/qemu-arm-static usr/bin/
+sudo cp /usr/bin/qemu-aarch64-static usr/bin/
 
 # Set up basic Alpine files - generate repositories dynamically
 sudo chroot . /bin/sh << CHROOT_SETUP
