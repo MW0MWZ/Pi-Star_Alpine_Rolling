@@ -22,38 +22,48 @@ sudo mount -t proc proc proc/
 sudo mount -t sysfs sysfs sys/
 sudo mount -o bind /dev dev/
 
-# Copy qemu static
-sudo cp /usr/bin/qemu-arm-static usr/bin/
-
 # Configure Alpine
 echo "Configuring Alpine Linux..."
 
-# We're currently in BUILD_DIR/rootfs, so repository root is at GITHUB_WORKSPACE
 REPO_ROOT="${GITHUB_WORKSPACE}"
 echo "Using repository root: $REPO_ROOT"
 
 if [ ! -f "$REPO_ROOT/config/alpine/repositories" ]; then
     echo "ERROR: Cannot find repositories file at: $REPO_ROOT/config/alpine/repositories"
-    echo "Current directory: $(pwd)"
-    echo "GITHUB_WORKSPACE: ${GITHUB_WORKSPACE:-not set}"
-    echo "Available files in GITHUB_WORKSPACE:"
-    ls -la "$REPO_ROOT/" 2>/dev/null || echo "GITHUB_WORKSPACE directory not accessible"
-    echo "Available files in config:"
-    ls -la "$REPO_ROOT/config/" 2>/dev/null || echo "config directory not found"
     exit 1
 fi
 
+# First, set up the basic Alpine environment
+echo "Setting up basic Alpine chroot..."
+
+# Copy qemu static BEFORE doing anything else
+sudo cp /usr/bin/qemu-arm-static usr/bin/
+
+# Set up basic Alpine files
 sudo cp "$REPO_ROOT/config/alpine/repositories" etc/apk/repositories
 
-# Install base packages using the host architecture first
-echo "Installing base packages..."
+# Initialize the keyring and basic Alpine setup
+sudo chroot . /bin/sh << 'CHROOT_SETUP'
+# Set up Alpine keyring first
+apk --no-cache add alpine-keys
 
-# Install packages in host environment first
-sudo apk update
-sudo apk add --no-cache \
-    alpine-base \
+# Now try to update package lists
+apk update
+
+# Install absolutely essential packages first
+apk add --no-cache alpine-base busybox
+
+# Set up basic system
+/bin/busybox --install -s
+
+echo "Basic Alpine setup complete"
+CHROOT_SETUP
+
+# Now install the full package set
+echo "Installing full package set..."
+sudo chroot . /bin/sh << 'CHROOT_PACKAGES'
+apk add --no-cache \
     alpine-conf \
-    busybox \
     openrc \
     eudev \
     dbus \
@@ -66,10 +76,12 @@ sudo apk add --no-cache \
     ca-certificates \
     tzdata
 
-# Now copy the installed packages to the chroot
-echo "Setting up chroot environment..."
-sudo chroot . sh << 'CHROOT_EOF'
-# Just setup the basic services, packages are already installed
+echo "Package installation complete"
+CHROOT_PACKAGES
+
+# Enable essential services
+echo "Configuring services..."
+sudo chroot . /bin/sh << 'CHROOT_SERVICES'
 rc-update add bootmisc boot
 rc-update add hostname boot
 rc-update add modules boot
@@ -77,7 +89,7 @@ rc-update add devfs sysinit
 rc-update add dbus default
 rc-update add sshd default
 rc-update add chronyd default
-CHROOT_EOF
+CHROOT_SERVICES
 
 # Install Pi-Star (placeholder or actual)
 echo "Installing Pi-Star (mode: ${PI_STAR_MODE})..."
