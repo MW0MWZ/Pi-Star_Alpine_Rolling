@@ -22,7 +22,7 @@ on:
 
 env:
   BUILD_ARCH: armhf
-  ALPINE_VERSION: 3.22
+  ALPINE_VERSION: 3.19
 
 jobs:
   build:

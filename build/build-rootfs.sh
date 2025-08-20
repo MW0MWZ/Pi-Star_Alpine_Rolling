@@ -26,12 +26,9 @@ sudo mount -o bind /dev dev/
 echo "Configuring Alpine Linux..."
 
 REPO_ROOT="${GITHUB_WORKSPACE}"
+ALPINE_VER="${ALPINE_VERSION:-3.19}"
 echo "Using repository root: $REPO_ROOT"
-
-if [ ! -f "$REPO_ROOT/config/alpine/repositories" ]; then
-    echo "ERROR: Cannot find repositories file at: $REPO_ROOT/config/alpine/repositories"
-    exit 1
-fi
+echo "Using Alpine version: $ALPINE_VER"
 
 # First, set up the basic Alpine environment
 echo "Setting up basic Alpine chroot..."
@@ -39,11 +36,15 @@ echo "Setting up basic Alpine chroot..."
 # Copy qemu static BEFORE doing anything else
 sudo cp /usr/bin/qemu-arm-static usr/bin/
 
-# Set up basic Alpine files
-sudo cp "$REPO_ROOT/config/alpine/repositories" etc/apk/repositories
+# Set up basic Alpine files - generate repositories dynamically
+sudo chroot . /bin/sh << CHROOT_SETUP
+# Set up repositories properly for armhf using environment variable
+echo "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/main" > /etc/apk/repositories
+echo "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/community" >> /etc/apk/repositories
 
-# Initialize the keyring and basic Alpine setup
-sudo chroot . /bin/sh << 'CHROOT_SETUP'
+echo "Generated repositories:"
+cat /etc/apk/repositories
+
 # Set up Alpine keyring first
 apk --no-cache add alpine-keys
 
