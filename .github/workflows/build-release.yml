@@ -83,8 +83,8 @@ jobs:
       - name: Build root filesystem
         run: |
           sudo chmod +x build/*.sh
-          sudo ./build/build-rootfs.sh \
-            "${{ steps.version.outputs.VERSION }}" \
+          sudo -E ./build/build-rootfs.sh \\
+            "${{ steps.version.outputs.VERSION }}" \\
             "${{ github.event.inputs.pi_star_mode || 'placeholder' }}"
         env:
           BUILD_DIR: /tmp/pi-star-build
