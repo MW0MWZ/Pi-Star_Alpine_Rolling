@@ -21,7 +21,7 @@ on:
         default: 'placeholder'
 
 env:
-  BUILD_ARCH: arm64
+  BUILD_ARCH: aarch64
   ALPINE_VERSION: 3.18
 
 jobs:
@@ -70,7 +70,7 @@ jobs:
           mkdir -p /tmp/alpine-cache
           if [ ! -f /tmp/alpine-cache/alpine-minirootfs.tar.gz ]; then
             wget -O /tmp/alpine-cache/alpine-minirootfs.tar.gz \
-              "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/releases/${{ env.BUILD_ARCH }}/alpine-minirootfs-${{ env.ALPINE_VERSION }}.3-${{ env.BUILD_ARCH }}.tar.gz"
+              "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/releases/${{ env.BUILD_ARCH }}/alpine-minirootfs-${{ env.ALPINE_VERSION }}.9-${{ env.BUILD_ARCH }}.tar.gz"
           fi
 
       - name: Prepare signing keys
