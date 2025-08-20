@@ -45,20 +45,12 @@ fi
 
 sudo cp "$REPO_ROOT/config/alpine/repositories" etc/apk/repositories
 
-# Install base packages
-sudo chroot . sh << 'CHROOT_EOF'
-# Retry apk update a few times in case of network issues
-for i in 1 2 3; do
-    echo "Attempting apk update (attempt $i)..."
-    if apk update; then
-        break
-    else
-        echo "apk update failed, waiting 10 seconds before retry..."
-        sleep 10
-    fi
-done
+# Install base packages using the host architecture first
+echo "Installing base packages..."
 
-apk add --no-cache \
+# Install packages in host environment first
+sudo apk update
+sudo apk add --no-cache \
     alpine-base \
     alpine-conf \
     busybox \
@@ -72,11 +64,12 @@ apk add --no-cache \
     bash \
     openssl \
     ca-certificates \
-    tzdata \
-    docker \
-    docker-compose
+    tzdata
 
-# Enable essential services
+# Now copy the installed packages to the chroot
+echo "Setting up chroot environment..."
+sudo chroot . sh << 'CHROOT_EOF'
+# Just setup the basic services, packages are already installed
 rc-update add bootmisc boot
 rc-update add hostname boot
 rc-update add modules boot
@@ -84,7 +77,6 @@ rc-update add devfs sysinit
 rc-update add dbus default
 rc-update add sshd default
 rc-update add chronyd default
-rc-update add docker default
 CHROOT_EOF
 
 # Install Pi-Star (placeholder or actual)

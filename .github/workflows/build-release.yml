@@ -22,7 +22,7 @@ on:
 
 env:
   BUILD_ARCH: armhf
-  ALPINE_VERSION: 3.19
+  ALPINE_VERSION: 3.22
 
 jobs:
   build:
@@ -79,6 +79,16 @@ jobs:
           echo "${{ secrets.UPDATE_PRIVATE_KEY }}" > keys/private.pem
           echo "${{ secrets.UPDATE_PUBLIC_KEY }}" > keys/public.pem
           chmod 600 keys/private.pem
+
+      - name: Test Alpine Repository Access
+        run: |
+          echo "Testing Alpine repository access..."
+          curl -I https://dl-cdn.alpinelinux.org/alpine/v3.19/main/armhf/APKINDEX.tar.gz || echo "armhf repos failed"
+          curl -I http://mirrors.kernel.org/alpine/v3.19/main/armhf/APKINDEX.tar.gz || echo "mirror armhf repos failed"
+          echo "Testing x86_64 repos..."
+          curl -I https://dl-cdn.alpinelinux.org/alpine/v3.19/main/x86_64/APKINDEX.tar.gz || echo "x86_64 repos failed"
+          echo "Testing network connectivity..."
+          curl -I https://www.google.com || echo "general internet failed"
 
       - name: Build root filesystem
         run: |
