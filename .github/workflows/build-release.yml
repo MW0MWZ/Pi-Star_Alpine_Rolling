@@ -97,30 +97,6 @@ jobs:
           echo "${{ secrets.UPDATE_PUBLIC_KEY }}" > keys/public.pem
           chmod 600 keys/private.pem
 
-      - name: Test Alpine Repository Access
-        run: |
-          echo "Testing Alpine repository access for version ${{ env.ALPINE_VERSION }}..."
-          echo "Testing main repository access:"
-          curl -I "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/main/${{ env.BUILD_ARCH }}/APKINDEX.tar.gz" || echo "Main repo failed"
-          echo "Testing community repository access:"
-          curl -I "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/community/${{ env.BUILD_ARCH }}/APKINDEX.tar.gz" || echo "Community repo failed"
-          
-          echo "Testing alternative mirrors:"
-          curl -I "https://uk.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/main/${{ env.BUILD_ARCH }}/APKINDEX.tar.gz" || echo "UK mirror failed"
-          curl -I "https://ftp.halifax.rwth-aachen.de/alpine/v${{ env.ALPINE_VERSION }}/main/${{ env.BUILD_ARCH }}/APKINDEX.tar.gz" || echo "German mirror failed"
-          
-          echo "Testing x86_64 repos (for reference):"
-          curl -I "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/main/x86_64/APKINDEX.tar.gz" || echo "x86_64 main repo failed"
-          
-          echo "Testing general network connectivity:"
-          curl -I https://www.google.com || echo "General internet failed"
-          
-          echo "Testing Alpine releases page:"
-          curl -I "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/releases/" || echo "Releases page failed"
-          
-          echo "DNS resolution test:"
-          nslookup dl-cdn.alpinelinux.org || echo "DNS resolution failed"
-
       - name: Build root filesystem
         run: |
           sudo chmod +x build/*.sh
