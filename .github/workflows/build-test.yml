@@ -1,0 +1,49 @@
+name: Test Build
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up build environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static debootstrap binfmt-support
+
+      - name: Test rootfs build
+        run: |
+          sudo chmod +x build/*.sh
+          sudo ./build/build-rootfs.sh "test-$(date +%s)" "placeholder"
+        env:
+          BUILD_DIR: /tmp/test-build
+          
+      - name: Validate build output
+        run: |
+          if [ ! -d "/tmp/test-build/rootfs" ]; then
+            echo "Build failed - no rootfs directory"
+            exit 1
+          fi
+          
+          # Check essential files exist
+          essential_files=(
+            "/tmp/test-build/rootfs/etc/alpine-release"
+            "/tmp/test-build/rootfs/usr/local/bin/install-update"
+            "/tmp/test-build/rootfs/usr/local/bin/update-daemon"
+            "/tmp/test-build/rootfs/etc/pi-star-version"
+          )
+          
+          for file in "${essential_files[@]}"; do
+            if [ ! -f "$file" ]; then
+              echo "Missing essential file: $file"
+              exit 1
+            fi
+          done
+          
+          echo "Build validation passed!"

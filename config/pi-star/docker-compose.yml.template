@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  pi-star-core:
+    image: pi-star/core:latest
+    container_name: pi-star-core
+    restart: unless-stopped
+    network_mode: host
+    privileged: true
+    volumes:
+      - /opt/pi-star/data:/var/lib/pi-star
+      - /var/log/pi-star:/var/log/pi-star
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - PI_STAR_VERSION=${VERSION}
+    labels:
+      - "com.pi-star.service=core"
+
+  pi-star-web:
+    image: pi-star/web:latest
+    container_name: pi-star-web
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /opt/pi-star/data:/var/lib/pi-star:ro
+      - /opt/pi-star/web:/var/www/html
+    depends_on:
+      - pi-star-core
+    labels:
+      - "com.pi-star.service=web"

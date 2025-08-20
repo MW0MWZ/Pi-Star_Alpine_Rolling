@@ -1,0 +1,32 @@
+# Build artifacts
+/output/
+/build-temp/
+*.tar.gz
+*.sig
+
+# Keys (use GitHub Secrets instead)
+keys/*.pem
+keys/*.key
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Temporary files
+/tmp/
+/temp/
