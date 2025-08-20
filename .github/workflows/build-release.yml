@@ -89,6 +89,7 @@ jobs:
         env:
           BUILD_DIR: /tmp/pi-star-build
           CACHE_DIR: /tmp/alpine-cache
+          GITHUB_WORKSPACE: ${{ github.workspace }}
 
       - name: Package and sign update
         run: |
