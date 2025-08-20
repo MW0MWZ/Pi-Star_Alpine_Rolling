@@ -13,16 +13,17 @@ fi
 
 echo "Packaging Pi-Star update v${VERSION}..."
 
-# Verify rootfs directory exists
-if [ ! -d "$ROOTFS_DIR" ]; then
-    echo "Error: Rootfs directory $ROOTFS_DIR does not exist"
+# Get absolute paths to avoid confusion
+ROOTFS_DIR="$(cd "$ROOTFS_DIR" && pwd)"
+OUTPUT_DIR="$(mkdir -p "$OUTPUT_DIR" && cd "$OUTPUT_DIR" && pwd)"
+
+# Verify rootfs directory exists and is readable
+if [ ! -d "$ROOTFS_DIR" ] || [ ! -r "$ROOTFS_DIR" ]; then
+    echo "Error: Rootfs directory $ROOTFS_DIR does not exist or is not readable"
     exit 1
 fi
 
-# Create output directory if it doesn't exist
-mkdir -p "$OUTPUT_DIR"
-
-# Verify output directory was created and is writable
+# Verify output directory exists and is writable
 if [ ! -d "$OUTPUT_DIR" ] || [ ! -w "$OUTPUT_DIR" ]; then
     echo "Error: Cannot create or write to output directory $OUTPUT_DIR"
     exit 1
@@ -37,18 +38,18 @@ echo "Creating package: $PACKAGE_PATH"
 echo "From rootfs: $ROOTFS_DIR"
 
 # Create the update package
-# Use relative paths and exclude problematic directories
-cd "$ROOTFS_DIR"
+echo "Creating tarball..."
 tar -czf "$PACKAGE_PATH" \
-    --exclude="./proc/*" \
-    --exclude="./sys/*" \
-    --exclude="./dev/*" \
-    --exclude="./tmp/*" \
-    --exclude="./var/cache/*" \
-    --exclude="./var/log/*" \
-    --exclude="./run/*" \
-    --exclude="./mnt/*" \
-    --exclude="./media/*" \
+    -C "$ROOTFS_DIR" \
+    --exclude="proc/*" \
+    --exclude="sys/*" \
+    --exclude="dev/*" \
+    --exclude="tmp/*" \
+    --exclude="var/cache/*" \
+    --exclude="var/log/*" \
+    --exclude="run/*" \
+    --exclude="mnt/*" \
+    --exclude="media/*" \
     --owner=0 \
     --group=0 \
     .
@@ -94,21 +95,21 @@ fi
 # Generate checksums
 echo "Generating checksums..."
 cd "$OUTPUT_DIR"
-sha256sum "${PACKAGE_NAME}" > "${PACKAGE_NAME}.sha256"
-md5sum "${PACKAGE_NAME}" > "${PACKAGE_NAME}.md5"
+sha256sum "$PACKAGE_NAME" > "${PACKAGE_NAME}.sha256"
+md5sum "$PACKAGE_NAME" > "${PACKAGE_NAME}.md5"
 
 echo "Generated checksums:"
 cat "${PACKAGE_NAME}.sha256"
 cat "${PACKAGE_NAME}.md5"
 
 # Create package manifest
-cat > "${OUTPUT_DIR}/package-manifest.json" << EOF
+cat > "package-manifest.json" << EOF
 {
     "package": {
-        "name": "${PACKAGE_NAME}",
-        "version": "${VERSION}",
+        "name": "$PACKAGE_NAME",
+        "version": "$VERSION",
         "created": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-        "size": ${PACKAGE_SIZE},
+        "size": $PACKAGE_SIZE,
         "sha256": "$(cut -d' ' -f1 ${PACKAGE_NAME}.sha256)",
         "md5": "$(cut -d' ' -f1 ${PACKAGE_NAME}.md5)"
     },
@@ -118,7 +119,7 @@ cat > "${OUTPUT_DIR}/package-manifest.json" << EOF
         "created": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     },
     "build": {
-        "rootfs_source": "${ROOTFS_DIR}",
+        "rootfs_source": "$ROOTFS_DIR",
         "build_host": "$(hostname)",
         "build_user": "$(whoami)",
         "git_commit": "${GITHUB_SHA:-unknown}",
