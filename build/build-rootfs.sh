@@ -27,7 +27,7 @@ sudo cp /usr/bin/qemu-arm-static usr/bin/
 
 # Configure Alpine
 echo "Configuring Alpine Linux..."
-sudo cp "${GITHUB_WORKSPACE}/config/alpine/repositories" etc/apk/repositories
+sudo cp "${GITHUB_WORKSPACE:-$(pwd)/..}/config/alpine/repositories" etc/apk/repositories
 
 # Install base packages
 sudo chroot . sh << 'CHROOT_EOF'
@@ -65,23 +65,23 @@ CHROOT_EOF
 echo "Installing Pi-Star (mode: ${PI_STAR_MODE})..."
 case "$PI_STAR_MODE" in
     "docker")
-        sudo cp "${GITHUB_WORKSPACE}/config/pi-star/docker-compose.yml.template" opt/pi-star/docker-compose.yml
-        sudo "${GITHUB_WORKSPACE}/config/pi-star/docker-install.sh" .
+        sudo cp "${GITHUB_WORKSPACE:-$(pwd)/..}/config/pi-star/docker-compose.yml.template" opt/pi-star/docker-compose.yml
+        sudo "${GITHUB_WORKSPACE:-$(pwd)/..}/config/pi-star/docker-install.sh" .
         ;;
     "native")
-        sudo "${GITHUB_WORKSPACE}/config/pi-star/native-install.sh" .
+        sudo "${GITHUB_WORKSPACE:-$(pwd)/..}/config/pi-star/native-install.sh" .
         ;;
     *)
-        sudo "${GITHUB_WORKSPACE}/config/pi-star/placeholder-install.sh" .
+        sudo "${GITHUB_WORKSPACE:-$(pwd)/..}/config/pi-star/placeholder-install.sh" .
         ;;
 esac
 
 # Install OTA system
 echo "Installing OTA update system..."
-sudo cp "${GITHUB_WORKSPACE}/scripts/update-daemon.sh" usr/local/bin/update-daemon
-sudo cp "${GITHUB_WORKSPACE}/scripts/install-update.sh" usr/local/bin/install-update
-sudo cp "${GITHUB_WORKSPACE}/scripts/boot-validator.sh" usr/local/bin/boot-validator
-sudo cp "${GITHUB_WORKSPACE}/scripts/partition-switcher.sh" usr/local/bin/partition-switcher
+sudo cp "${GITHUB_WORKSPACE:-$(pwd)/..}/scripts/update-daemon.sh" usr/local/bin/update-daemon
+sudo cp "${GITHUB_WORKSPACE:-$(pwd)/..}/scripts/install-update.sh" usr/local/bin/install-update
+sudo cp "${GITHUB_WORKSPACE:-$(pwd)/..}/scripts/boot-validator.sh" usr/local/bin/boot-validator
+sudo cp "${GITHUB_WORKSPACE:-$(pwd)/..}/scripts/partition-switcher.sh" usr/local/bin/partition-switcher
 
 sudo chmod +x usr/local/bin/update-daemon
 sudo chmod +x usr/local/bin/install-update
@@ -89,14 +89,14 @@ sudo chmod +x usr/local/bin/boot-validator
 sudo chmod +x usr/local/bin/partition-switcher
 
 # Copy public key
-sudo cp "${GITHUB_WORKSPACE}/keys/public.pem" etc/pi-star-update-key.pub
+sudo cp "${GITHUB_WORKSPACE:-$(pwd)/..}/keys/public.pem" etc/pi-star-update-key.pub
 
 # Set version
 echo "$VERSION" | sudo tee etc/pi-star-version
 
 # Configure system files
-sudo cp "${GITHUB_WORKSPACE}/config/system/fstab" etc/fstab
-sudo cp "${GITHUB_WORKSPACE}/config/system/hostname" etc/hostname
+sudo cp "${GITHUB_WORKSPACE:-$(pwd)/..}/config/system/fstab" etc/fstab
+sudo cp "${GITHUB_WORKSPACE:-$(pwd)/..}/config/system/hostname" etc/hostname
 
 # Create services
 sudo tee etc/init.d/pi-star-updater << 'SERVICE_EOF'
