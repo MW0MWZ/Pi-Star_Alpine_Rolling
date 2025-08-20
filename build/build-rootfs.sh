@@ -47,7 +47,17 @@ sudo cp "$REPO_ROOT/config/alpine/repositories" etc/apk/repositories
 
 # Install base packages
 sudo chroot . sh << 'CHROOT_EOF'
-apk update
+# Retry apk update a few times in case of network issues
+for i in 1 2 3; do
+    echo "Attempting apk update (attempt $i)..."
+    if apk update; then
+        break
+    else
+        echo "apk update failed, waiting 10 seconds before retry..."
+        sleep 10
+    fi
+done
+
 apk add --no-cache \
     alpine-base \
     alpine-conf \
