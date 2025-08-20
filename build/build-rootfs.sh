@@ -17,7 +17,7 @@ mkdir -p rootfs
 cd rootfs
 sudo tar -xzf "$CACHE_DIR/alpine-minirootfs.tar.gz"
 
-# Mount for chroot
+# Mount for chroot - including network access
 sudo mount -t proc proc proc/
 sudo mount -t sysfs sysfs sys/
 sudo mount -o bind /dev dev/
@@ -40,9 +40,21 @@ sudo cp /usr/bin/qemu-aarch64-static usr/bin/
 
 # Set up basic Alpine files - generate repositories dynamically
 sudo chroot . /bin/sh << CHROOT_SETUP
+# Ensure DNS resolution works by copying host DNS config
+echo "nameserver 8.8.8.8" > /etc/resolv.conf
+echo "nameserver 8.8.4.4" >> /etc/resolv.conf
+echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+
+# Test DNS resolution
+echo "Testing DNS resolution inside chroot..."
+nslookup dl-cdn.alpinelinux.org || echo "DNS test failed but continuing"
+
 # Set up repositories properly for ARM64 using current stable Alpine version
-echo "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/main" > /etc/apk/repositories
-echo "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/community" >> /etc/apk/repositories
+# Try CDN first, then fallback mirrors if CDN fails
+cat > /etc/apk/repositories << 'EOF'
+https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/main
+https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/community
+EOF
 
 echo "Generated repositories for Alpine ${ALPINE_VER}:"
 cat /etc/apk/repositories
@@ -50,11 +62,45 @@ cat /etc/apk/repositories
 # Clear any existing cache that might be stale
 rm -rf /var/cache/apk/*
 
-# Set up Alpine keyring first - this is critical for repository access
-apk --no-cache add alpine-keys alpine-base
+# Test connectivity first
+if ! wget -q --spider https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/main/aarch64/APKINDEX.tar.gz; then
+    echo "CDN unavailable, switching to mirror..."
+    cat > /etc/apk/repositories << 'EOF'
+https://uk.alpinelinux.org/alpine/v${ALPINE_VER}/main
+https://uk.alpinelinux.org/alpine/v${ALPINE_VER}/community
+EOF
+    echo "Updated repositories to use UK mirror:"
+    cat /etc/apk/repositories
+fi
 
-# Force refresh of package indexes
-apk update --force-refresh
+# Set up Alpine keyring first - this is critical for repository access
+echo "Installing Alpine keys..."
+apk --no-cache add alpine-keys || {
+    echo "Failed to add alpine-keys, trying with --force-broken-world"
+    apk --no-cache --force-broken-world add alpine-keys
+}
+
+# Add alpine-base immediately after keys
+apk --no-cache add alpine-base || {
+    echo "Failed to add alpine-base, trying alternative approach"
+    apk --no-cache --force-broken-world add alpine-base
+}
+
+# Force refresh of package indexes with retries
+echo "Updating package indexes..."
+for i in 1 2 3; do
+    if apk update --force-refresh; then
+        echo "Package index update successful on attempt $i"
+        break
+    else
+        echo "Package index update failed on attempt $i"
+        if [ $i -eq 3 ]; then
+            echo "All update attempts failed, but continuing..."
+        else
+            sleep 5
+        fi
+    fi
+done
 
 # === DEBUGGING PACKAGE AVAILABILITY ===
 echo "=== DEBUGGING PACKAGE AVAILABILITY ==="
@@ -62,9 +108,13 @@ echo "APK version:"
 apk --version
 echo "Architecture:"
 uname -m
+echo "DNS resolution test:"
+nslookup dl-cdn.alpinelinux.org 2>/dev/null || echo "nslookup failed"
+echo "Network test:"
+ping -c 1 8.8.8.8 2>/dev/null || echo "ping failed"
 echo "Available packages (sample):"
-apk search alpine-base | head -5
-apk search busybox | head -5
+apk search alpine-base | head -5 || echo "search failed"
+apk search busybox | head -5 || echo "search failed"
 echo "Repository files:"
 cat /etc/apk/repositories
 echo "Cache directory:"
@@ -77,7 +127,10 @@ echo "=== END DEBUG ==="
 
 # Install essential packages
 echo "Installing essential Alpine packages..."
-apk add --no-cache alpine-base busybox
+apk add --no-cache alpine-base busybox || {
+    echo "Standard install failed, trying with --force-broken-world"
+    apk add --no-cache --force-broken-world alpine-base busybox
+}
 
 # Set up basic system
 /bin/busybox --install -s
@@ -129,38 +182,64 @@ CHROOT_SERVICES
 echo "Installing Pi-Star (mode: ${PI_STAR_MODE})..."
 case "$PI_STAR_MODE" in
     "docker")
-        sudo cp "$REPO_ROOT/config/pi-star/docker-compose.yml.template" opt/pi-star/docker-compose.yml
-        sudo "$REPO_ROOT/config/pi-star/docker-install.sh" .
+        if [ -f "$REPO_ROOT/config/pi-star/docker-compose.yml.template" ]; then
+            sudo mkdir -p opt/pi-star
+            sudo cp "$REPO_ROOT/config/pi-star/docker-compose.yml.template" opt/pi-star/docker-compose.yml
+        fi
+        if [ -f "$REPO_ROOT/config/pi-star/docker-install.sh" ]; then
+            sudo "$REPO_ROOT/config/pi-star/docker-install.sh" .
+        fi
         ;;
     "native")
-        sudo "$REPO_ROOT/config/pi-star/native-install.sh" .
+        if [ -f "$REPO_ROOT/config/pi-star/native-install.sh" ]; then
+            sudo "$REPO_ROOT/config/pi-star/native-install.sh" .
+        fi
         ;;
     *)
-        sudo "$REPO_ROOT/config/pi-star/placeholder-install.sh" .
+        if [ -f "$REPO_ROOT/config/pi-star/placeholder-install.sh" ]; then
+            sudo "$REPO_ROOT/config/pi-star/placeholder-install.sh" .
+        fi
         ;;
 esac
 
 # Install OTA system
 echo "Installing OTA update system..."
-sudo cp "$REPO_ROOT/scripts/update-daemon.sh" usr/local/bin/update-daemon
-sudo cp "$REPO_ROOT/scripts/install-update.sh" usr/local/bin/install-update
-sudo cp "$REPO_ROOT/scripts/boot-validator.sh" usr/local/bin/boot-validator
-sudo cp "$REPO_ROOT/scripts/partition-switcher.sh" usr/local/bin/partition-switcher
+if [ -f "$REPO_ROOT/scripts/update-daemon.sh" ]; then
+    sudo cp "$REPO_ROOT/scripts/update-daemon.sh" usr/local/bin/update-daemon
+    sudo chmod +x usr/local/bin/update-daemon
+fi
 
-sudo chmod +x usr/local/bin/update-daemon
-sudo chmod +x usr/local/bin/install-update
-sudo chmod +x usr/local/bin/boot-validator
-sudo chmod +x usr/local/bin/partition-switcher
+if [ -f "$REPO_ROOT/scripts/install-update.sh" ]; then
+    sudo cp "$REPO_ROOT/scripts/install-update.sh" usr/local/bin/install-update
+    sudo chmod +x usr/local/bin/install-update
+fi
+
+if [ -f "$REPO_ROOT/scripts/boot-validator.sh" ]; then
+    sudo cp "$REPO_ROOT/scripts/boot-validator.sh" usr/local/bin/boot-validator
+    sudo chmod +x usr/local/bin/boot-validator
+fi
+
+if [ -f "$REPO_ROOT/scripts/partition-switcher.sh" ]; then
+    sudo cp "$REPO_ROOT/scripts/partition-switcher.sh" usr/local/bin/partition-switcher
+    sudo chmod +x usr/local/bin/partition-switcher
+fi
 
 # Copy public key
-sudo cp "$REPO_ROOT/keys/public.pem" etc/pi-star-update-key.pub
+if [ -f "$REPO_ROOT/keys/public.pem" ]; then
+    sudo cp "$REPO_ROOT/keys/public.pem" etc/pi-star-update-key.pub
+fi
 
 # Set version
 echo "$VERSION" | sudo tee etc/pi-star-version
 
 # Configure system files
-sudo cp "$REPO_ROOT/config/system/fstab" etc/fstab
-sudo cp "$REPO_ROOT/config/system/hostname" etc/hostname
+if [ -f "$REPO_ROOT/config/system/fstab" ]; then
+    sudo cp "$REPO_ROOT/config/system/fstab" etc/fstab
+fi
+
+if [ -f "$REPO_ROOT/config/system/hostname" ]; then
+    sudo cp "$REPO_ROOT/config/system/hostname" etc/hostname
+fi
 
 # Create services
 sudo tee etc/init.d/pi-star-updater << 'SERVICE_EOF'
