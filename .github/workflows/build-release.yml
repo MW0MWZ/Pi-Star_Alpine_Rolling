@@ -21,7 +21,7 @@ on:
         default: 'placeholder'
 
 env:
-  BUILD_ARCH: aarch64
+  BUILD_ARCH: armhf
   ALPINE_VERSION: 3.22  # Updated to current stable version
 
 jobs:
@@ -69,7 +69,7 @@ jobs:
         run: |
           mkdir -p /tmp/alpine-cache
           if [ ! -f /tmp/alpine-cache/alpine-minirootfs.tar.gz ]; then
-            # Updated download URL for Alpine 3.22
+            # Updated download URL for Alpine 3.22 armhf
             wget -O /tmp/alpine-cache/alpine-minirootfs.tar.gz \
               "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/releases/${{ env.BUILD_ARCH }}/alpine-minirootfs-${{ env.ALPINE_VERSION }}.0-${{ env.BUILD_ARCH }}.tar.gz"
             
@@ -129,7 +129,14 @@ jobs:
           BUILD_DIR: /tmp/pi-star-build
           CACHE_DIR: /tmp/alpine-cache
           GITHUB_WORKSPACE: ${{ github.workspace }}
-          ALPINE_VERSION: ${{ env.ALPINE_VERSION }}  # Pass Alpine version to build script
+          ALPINE_VERSION: ${{ env.ALPINE_VERSION }}
+
+      - name: Build SD card image
+        run: |
+          sudo -E ./build/build-sd-image.sh "${{ steps.version.outputs.VERSION }}" "pi-star-${{ steps.version.outputs.VERSION }}.img"
+        env:
+          BUILD_DIR: /tmp/pi-star-image-build
+          GITHUB_WORKSPACE: ${{ github.workspace }}  # Pass Alpine version to build script
 
       - name: Create package-update.sh if missing
         run: |
@@ -219,7 +226,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pi-star-update-${{ steps.version.outputs.VERSION }}
-          path: output/*
+          path: |
+            output/*
+            /tmp/pi-star-image-build/pi-star-${{ steps.version.outputs.VERSION }}.img.gz
           retention-days: 90
 
       - name: Create GitHub Release
@@ -230,6 +239,7 @@ jobs:
             output/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz
             output/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz.sig
             output/release-info.json
+            /tmp/pi-star-image-build/pi-star-${{ steps.version.outputs.VERSION }}.img.gz
           body: |
             ## Pi-Star OTA Update v${{ steps.version.outputs.VERSION }}
             

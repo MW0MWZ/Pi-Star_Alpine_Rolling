@@ -35,8 +35,8 @@ echo "Using Alpine version: $ALPINE_VER"
 echo "Setting up basic Alpine chroot..."
 
 # Copy qemu static BEFORE doing anything else
-# Fixed: Use consistent architecture - assuming ARM64/aarch64
-sudo cp /usr/bin/qemu-aarch64-static usr/bin/
+# Fixed: Use consistent architecture - armhf (32-bit ARM)
+sudo cp /usr/bin/qemu-arm-static usr/bin/
 
 # Set up basic Alpine files - generate repositories dynamically
 sudo chroot . /bin/sh << CHROOT_SETUP
@@ -63,7 +63,7 @@ cat /etc/apk/repositories
 rm -rf /var/cache/apk/*
 
 # Test connectivity first
-if ! wget -q --spider https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/main/aarch64/APKINDEX.tar.gz; then
+if ! wget -q --spider https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/main/armhf/APKINDEX.tar.gz; then
     echo "CDN unavailable, switching to mirror..."
     cat > /etc/apk/repositories << 'EOF'
 https://uk.alpinelinux.org/alpine/v${ALPINE_VER}/main
@@ -101,6 +101,29 @@ for i in 1 2 3; do
         fi
     fi
 done
+
+# === DEBUGGING PACKAGE AVAILABILITY ===
+echo "=== DEBUGGING PACKAGE AVAILABILITY ==="
+echo "APK version:"
+apk --version
+echo "Architecture:"
+uname -m
+echo "DNS resolution test:"
+nslookup dl-cdn.alpinelinux.org 2>/dev/null || echo "nslookup failed"
+echo "Network test:"
+ping -c 1 8.8.8.8 2>/dev/null || echo "ping failed"
+echo "Available packages (sample):"
+apk search alpine-base | head -5 || echo "search failed"
+apk search busybox | head -5 || echo "search failed"
+echo "Repository files:"
+cat /etc/apk/repositories
+echo "Cache directory:"
+ls -la /var/cache/apk/ || echo "cache dir not found"
+echo "APK database:"
+ls -la /lib/apk/db/ || echo "db dir not found"
+echo "Repository connectivity test:"
+apk update -v 2>&1 | head -10
+echo "=== END DEBUG ==="
 
 # Install essential packages
 echo "Installing essential Alpine packages..."
@@ -242,7 +265,7 @@ sudo chroot . apk cache clean
 sudo rm -rf var/cache/apk/*
 sudo rm -rf tmp/*
 # Fixed: Remove the correct qemu binary
-sudo rm -f usr/bin/qemu-aarch64-static
+sudo rm -f usr/bin/qemu-arm-static
 
 # Unmount
 sudo umount proc sys dev
