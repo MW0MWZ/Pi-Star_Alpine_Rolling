@@ -102,29 +102,6 @@ for i in 1 2 3; do
     fi
 done
 
-# === DEBUGGING PACKAGE AVAILABILITY ===
-echo "=== DEBUGGING PACKAGE AVAILABILITY ==="
-echo "APK version:"
-apk --version
-echo "Architecture:"
-uname -m
-echo "DNS resolution test:"
-nslookup dl-cdn.alpinelinux.org 2>/dev/null || echo "nslookup failed"
-echo "Network test:"
-ping -c 1 8.8.8.8 2>/dev/null || echo "ping failed"
-echo "Available packages (sample):"
-apk search alpine-base | head -5 || echo "search failed"
-apk search busybox | head -5 || echo "search failed"
-echo "Repository files:"
-cat /etc/apk/repositories
-echo "Cache directory:"
-ls -la /var/cache/apk/ || echo "cache dir not found"
-echo "APK database:"
-ls -la /lib/apk/db/ || echo "db dir not found"
-echo "Repository connectivity test:"
-apk update -v 2>&1 | head -10
-echo "=== END DEBUG ==="
-
 # Install essential packages
 echo "Installing essential Alpine packages..."
 apk add --no-cache alpine-base busybox || {

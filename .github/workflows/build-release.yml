@@ -97,23 +97,6 @@ jobs:
           echo "${{ secrets.UPDATE_PUBLIC_KEY }}" > keys/public.pem
           chmod 600 keys/private.pem
 
-      - name: Test Alpine Repository Access
-        run: |
-          echo "Testing Alpine repository access for version ${{ env.ALPINE_VERSION }}..."
-          echo "Testing main repository access:"
-          curl -I "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/main/${{ env.BUILD_ARCH }}/APKINDEX.tar.gz" || echo "Main repo failed"
-          echo "Testing community repository access:"
-          curl -I "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/community/${{ env.BUILD_ARCH }}/APKINDEX.tar.gz" || echo "Community repo failed"
-          
-          echo "Testing x86_64 repos (for reference):"
-          curl -I "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/main/x86_64/APKINDEX.tar.gz" || echo "x86_64 main repo failed"
-          
-          echo "Testing general network connectivity:"
-          curl -I https://www.google.com || echo "General internet failed"
-          
-          echo "Testing Alpine releases page:"
-          curl -I "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/releases/" || echo "Releases page failed"
-
       - name: Build root filesystem
         run: |
           sudo chmod +x build/*.sh
@@ -123,6 +106,50 @@ jobs:
           CACHE_DIR: /tmp/alpine-cache
           GITHUB_WORKSPACE: ${{ github.workspace }}
           ALPINE_VERSION: ${{ env.ALPINE_VERSION }}  # Pass Alpine version to build script
+
+      - name: Create package-update.sh if missing
+        run: |
+          if [ ! -f "build/package-update.sh" ]; then
+            mkdir -p build
+            cat > build/package-update.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          VERSION="$1"
+          ROOTFS_DIR="$2"
+          OUTPUT_DIR="$3"
+          
+          if [ -z "$VERSION" ] || [ -z "$ROOTFS_DIR" ] || [ -z "$OUTPUT_DIR" ]; then
+              echo "Usage: $0 <version> <rootfs_dir> <output_dir>"
+              exit 1
+          fi
+          
+          echo "Packaging Pi-Star update v${VERSION}..."
+          
+          # Create output directory
+          mkdir -p "$OUTPUT_DIR"
+          
+          # Create the package
+          cd "$ROOTFS_DIR"
+          tar -czf "${OUTPUT_DIR}/pi-star-${VERSION}.tar.gz" \
+              --exclude="./proc/*" \
+              --exclude="./sys/*" \
+              --exclude="./dev/*" \
+              --exclude="./tmp/*" \
+              --exclude="./var/cache/*" \
+              --owner=0 --group=0 .
+          
+          # Sign if possible
+          if [ -f "${GITHUB_WORKSPACE}/keys/private.pem" ]; then
+              openssl dgst -sha256 -sign "${GITHUB_WORKSPACE}/keys/private.pem" \
+                  -out "${OUTPUT_DIR}/pi-star-${VERSION}.tar.gz.sig" \
+                  "${OUTPUT_DIR}/pi-star-${VERSION}.tar.gz"
+          fi
+          
+          echo "Package created: pi-star-${VERSION}.tar.gz"
+          EOF
+            chmod +x build/package-update.sh
+          fi
 
       - name: Package and sign update
         run: |
