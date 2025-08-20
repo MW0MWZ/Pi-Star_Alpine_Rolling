@@ -27,7 +27,22 @@ sudo cp /usr/bin/qemu-arm-static usr/bin/
 
 # Configure Alpine
 echo "Configuring Alpine Linux..."
-sudo cp "${GITHUB_WORKSPACE:-$(pwd)/..}/config/alpine/repositories" etc/apk/repositories
+
+# Find the repository root (where the config directory is)
+if [ -n "$GITHUB_WORKSPACE" ]; then
+    REPO_ROOT="$GITHUB_WORKSPACE"
+elif [ -f "../config/alpine/repositories" ]; then
+    REPO_ROOT="$(pwd)/.."
+elif [ -f "../../config/alpine/repositories" ]; then
+    REPO_ROOT="$(pwd)/../.."
+else
+    echo "ERROR: Cannot find config/alpine/repositories"
+    find / -name "repositories" 2>/dev/null | grep alpine || true
+    exit 1
+fi
+
+echo "Using repository root: $REPO_ROOT"
+sudo cp "$REPO_ROOT/config/alpine/repositories" etc/apk/repositories
 
 # Install base packages
 sudo chroot . sh << 'CHROOT_EOF'
