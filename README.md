@@ -109,8 +109,8 @@ sudo /usr/local/bin/boot-validator
 
 ### Repository Structure
 ```
-├── .github/workflows/     # GitHub Actions CI/CD
-├── build/                 # Build scripts
+├── .github/workflows/    # GitHub Actions CI/CD
+├── build/                # Build scripts
 ├── config/               # System and Pi-Star configurations  
 ├── scripts/              # OTA update system scripts
 ├── server/               # GitHub Pages update server
@@ -128,12 +128,6 @@ openssl dgst -sha256 -verify public.pem \
   -signature update.tar.gz.sig update.tar.gz
 ```
 
-## Cost Analysis
-
-- **GitHub (this solution): $0/month**
-- **Traditional cloud hosting: $50-500/month** 
-- **Commercial OTA platforms: $160,000+/month**
-
 ## Security Features
 
 - RSA-2048 signature verification on all updates
@@ -145,7 +139,6 @@ openssl dgst -sha256 -verify public.pem \
 ## Support
 
 - **Issues**: [GitHub Issues](https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling/discussions)
 - **Documentation**: This README and inline code comments
 
 ## License
@@ -163,4 +156,4 @@ This project is open source. See LICENSE file for details.
 
 - Alpine Linux project for the minimal, secure base OS
 - GitHub for providing free CI/CD and hosting infrastructure
-- Pi-Star community for the digital radio platform
+- Andy Taylor (MW0MWZ) for a NEW way to Pi-Star!
