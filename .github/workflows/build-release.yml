@@ -22,7 +22,7 @@ on:
 
 env:
   BUILD_ARCH: aarch64
-  ALPINE_VERSION: 3.18
+  ALPINE_VERSION: 3.22  # Updated to current stable version
 
 jobs:
   build:
@@ -63,14 +63,31 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/alpine-cache
-          key: alpine-${{ env.ALPINE_VERSION }}-${{ env.BUILD_ARCH }}-v2
+          key: alpine-${{ env.ALPINE_VERSION }}-${{ env.BUILD_ARCH }}-v3  # Updated cache version
 
       - name: Download Alpine mini rootfs
         run: |
           mkdir -p /tmp/alpine-cache
           if [ ! -f /tmp/alpine-cache/alpine-minirootfs.tar.gz ]; then
+            # Updated download URL for Alpine 3.22
             wget -O /tmp/alpine-cache/alpine-minirootfs.tar.gz \
-              "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/releases/${{ env.BUILD_ARCH }}/alpine-minirootfs-${{ env.ALPINE_VERSION }}.9-${{ env.BUILD_ARCH }}.tar.gz"
+              "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/releases/${{ env.BUILD_ARCH }}/alpine-minirootfs-${{ env.ALPINE_VERSION }}.0-${{ env.BUILD_ARCH }}.tar.gz"
+            
+            # Verify download was successful
+            if [ ! -s /tmp/alpine-cache/alpine-minirootfs.tar.gz ]; then
+              echo "Failed to download Alpine rootfs, trying alternative URL..."
+              rm -f /tmp/alpine-cache/alpine-minirootfs.tar.gz
+              wget -O /tmp/alpine-cache/alpine-minirootfs.tar.gz \
+                "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/releases/${{ env.BUILD_ARCH }}/alpine-minirootfs-${{ env.ALPINE_VERSION }}.1-${{ env.BUILD_ARCH }}.tar.gz"
+            fi
+            
+            # Final verification
+            if [ ! -s /tmp/alpine-cache/alpine-minirootfs.tar.gz ]; then
+              echo "ERROR: Failed to download Alpine mini rootfs"
+              exit 1
+            fi
+            
+            echo "Downloaded Alpine rootfs size: $(ls -lh /tmp/alpine-cache/alpine-minirootfs.tar.gz)"
           fi
 
       - name: Prepare signing keys
@@ -82,13 +99,20 @@ jobs:
 
       - name: Test Alpine Repository Access
         run: |
-          echo "Testing Alpine repository access..."
-          curl -I https://dl-cdn.alpinelinux.org/alpine/v3.19/main/armhf/APKINDEX.tar.gz || echo "armhf repos failed"
-          curl -I http://mirrors.kernel.org/alpine/v3.19/main/armhf/APKINDEX.tar.gz || echo "mirror armhf repos failed"
-          echo "Testing x86_64 repos..."
-          curl -I https://dl-cdn.alpinelinux.org/alpine/v3.19/main/x86_64/APKINDEX.tar.gz || echo "x86_64 repos failed"
-          echo "Testing network connectivity..."
-          curl -I https://www.google.com || echo "general internet failed"
+          echo "Testing Alpine repository access for version ${{ env.ALPINE_VERSION }}..."
+          echo "Testing main repository access:"
+          curl -I "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/main/${{ env.BUILD_ARCH }}/APKINDEX.tar.gz" || echo "Main repo failed"
+          echo "Testing community repository access:"
+          curl -I "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/community/${{ env.BUILD_ARCH }}/APKINDEX.tar.gz" || echo "Community repo failed"
+          
+          echo "Testing x86_64 repos (for reference):"
+          curl -I "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/main/x86_64/APKINDEX.tar.gz" || echo "x86_64 main repo failed"
+          
+          echo "Testing general network connectivity:"
+          curl -I https://www.google.com || echo "General internet failed"
+          
+          echo "Testing Alpine releases page:"
+          curl -I "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/releases/" || echo "Releases page failed"
 
       - name: Build root filesystem
         run: |
@@ -98,6 +122,7 @@ jobs:
           BUILD_DIR: /tmp/pi-star-build
           CACHE_DIR: /tmp/alpine-cache
           GITHUB_WORKSPACE: ${{ github.workspace }}
+          ALPINE_VERSION: ${{ env.ALPINE_VERSION }}  # Pass Alpine version to build script
 
       - name: Package and sign update
         run: |
@@ -173,7 +198,11 @@ jobs:
           # Prepare update server files
           mkdir -p pages
           cp output/* pages/
-          cp server/* pages/
+          
+          # Copy server files if they exist
+          if [ -d "server" ]; then
+            cp server/* pages/
+          fi
           
           # Generate latest.json for update API
           cat > pages/latest.json << EOF
@@ -183,7 +212,9 @@ jobs:
             "signature_url": "https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.VERSION }}/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz.sig",
             "checksum": "$(sha256sum output/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz | cut -d' ' -f1)",
             "release_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "min_version": "2024.01.01"
+            "min_version": "2024.01.01",
+            "alpine_version": "${{ env.ALPINE_VERSION }}",
+            "architecture": "${{ env.BUILD_ARCH }}"
           }
           EOF
 

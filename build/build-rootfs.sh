@@ -26,7 +26,8 @@ sudo mount -o bind /dev dev/
 echo "Configuring Alpine Linux..."
 
 REPO_ROOT="${GITHUB_WORKSPACE}"
-ALPINE_VER="${ALPINE_VERSION:-3.19}"
+# Updated to use Alpine 3.22 (current stable)
+ALPINE_VER="${ALPINE_VERSION:-3.22}"
 echo "Using repository root: $REPO_ROOT"
 echo "Using Alpine version: $ALPINE_VER"
 
@@ -34,39 +35,48 @@ echo "Using Alpine version: $ALPINE_VER"
 echo "Setting up basic Alpine chroot..."
 
 # Copy qemu static BEFORE doing anything else
+# Fixed: Use consistent architecture - assuming ARM64/aarch64
 sudo cp /usr/bin/qemu-aarch64-static usr/bin/
 
 # Set up basic Alpine files - generate repositories dynamically
 sudo chroot . /bin/sh << CHROOT_SETUP
-# Set up repositories properly for armhf using environment variable
+# Set up repositories properly for ARM64 using current stable Alpine version
 echo "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/main" > /etc/apk/repositories
 echo "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VER}/community" >> /etc/apk/repositories
 
-echo "Generated repositories:"
+echo "Generated repositories for Alpine ${ALPINE_VER}:"
 cat /etc/apk/repositories
 
-# Set up Alpine keyring first
-apk --no-cache add alpine-keys
+# Clear any existing cache that might be stale
+rm -rf /var/cache/apk/*
 
-# Now try to update package lists
-apk update
+# Set up Alpine keyring first - this is critical for repository access
+apk --no-cache add alpine-keys alpine-base
+
+# Force refresh of package indexes
+apk update --force-refresh
 
 # === DEBUGGING PACKAGE AVAILABILITY ===
 echo "=== DEBUGGING PACKAGE AVAILABILITY ==="
-apk search alpine-base || echo "alpine-base not found in search"
-apk search busybox || echo "busybox not found in search"
-apk info || echo "apk info failed"
+echo "APK version:"
+apk --version
+echo "Architecture:"
+uname -m
+echo "Available packages (sample):"
+apk search alpine-base | head -5
+apk search busybox | head -5
 echo "Repository files:"
 cat /etc/apk/repositories
 echo "Cache directory:"
 ls -la /var/cache/apk/ || echo "cache dir not found"
 echo "APK database:"
 ls -la /lib/apk/db/ || echo "db dir not found"
-echo "Architecture:"
-uname -m
+echo "Repository connectivity test:"
+apk update -v 2>&1 | head -10
 echo "=== END DEBUG ==="
 
-# Install absolutely essential packages first
+# Install essential packages
+echo "Installing essential Alpine packages..."
 apk add --no-cache alpine-base busybox
 
 # Set up basic system
@@ -78,15 +88,23 @@ CHROOT_SETUP
 # Now install the full package set
 echo "Installing full package set..."
 sudo chroot . /bin/sh << 'CHROOT_PACKAGES'
+# Install packages in smaller groups to identify any problematic packages
+echo "Installing system packages..."
 apk add --no-cache \
     alpine-conf \
     openrc \
     eudev \
-    dbus \
+    dbus
+
+echo "Installing network and time services..."
+apk add --no-cache \
     chrony \
     openssh \
     curl \
-    wget \
+    wget
+
+echo "Installing shell and utilities..."
+apk add --no-cache \
     bash \
     openssl \
     ca-certificates \
@@ -163,10 +181,12 @@ sudo chmod +x etc/init.d/pi-star-updater
 sudo chroot . rc-update add pi-star-updater default
 
 # Cleanup
+echo "Cleaning up..."
 sudo chroot . apk cache clean
 sudo rm -rf var/cache/apk/*
 sudo rm -rf tmp/*
-sudo rm usr/bin/qemu-arm-static
+# Fixed: Remove the correct qemu binary
+sudo rm -f usr/bin/qemu-aarch64-static
 
 # Unmount
 sudo umount proc sys dev
