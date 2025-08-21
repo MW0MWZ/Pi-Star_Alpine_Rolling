@@ -1,13 +1,13 @@
 {
-  "version": "0.0.1-alpha16",
-  "build_date": "2025-08-21T11:39:29Z",
-  "commit": "655e8fd3bee656b919dc03ac84be24a763ff2075",
+  "version": "0.0.1-alpha17",
+  "build_date": "2025-08-21T11:51:05Z",
+  "commit": "ff96251a8fda2679caf5af58b598ae40777538af",
   "pi_star_mode": "placeholder",
   "architecture": "armhf",
   "alpine_version": "3.22",
   "files": {
-    "update": "pi-star-0.0.1-alpha16.tar.gz",
-    "signature": "pi-star-0.0.1-alpha16.tar.gz.sig",
-    "checksum": "d0980213db20cae1eb1ef95cdc7fceffcb1b67bded52fa555e81efcf1365f21e"
+    "update": "pi-star-0.0.1-alpha17.tar.gz",
+    "signature": "pi-star-0.0.1-alpha17.tar.gz.sig",
+    "checksum": "b3662422eb3b43581d2d370d34a7d8d7e0dd5bf49dd08158d4ad10c310ed7c4c"
   }
 }
