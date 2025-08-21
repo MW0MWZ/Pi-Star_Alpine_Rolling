@@ -78,6 +78,10 @@ mkfs.ext4 -F -L "PISTAR_ROOT_B" "${LOOP_DEVICE}p3"
 echo "Formatting data partition..."
 mkfs.ext4 -F -L "PISTAR_DATA" "${LOOP_DEVICE}p4"
 
+# Wait for filesystem creation to complete and sync
+sync
+sleep 2
+
 # Create mount points
 mkdir -p mnt/boot mnt/root-a mnt/root-b mnt/data
 
@@ -145,7 +149,8 @@ dtparam=i2c_arm=on
 EOF
 
 # Create initial cmdline.txt (will boot to slot A)
-echo "console=serial0,115200 console=tty1 root=LABEL=PISTAR_ROOT_A rootfstype=ext4 elevator=deadline fsck.repair=yes rootwait quiet" > mnt/boot/cmdline.txt
+# Use device path for reliability, but include rootwait for label detection
+echo "console=serial0,115200 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 elevator=deadline fsck.repair=yes rootwait quiet" > mnt/boot/cmdline.txt
 
 # Create A/B state file (start with slot A)
 echo "A" > mnt/boot/ab_state
@@ -202,7 +207,36 @@ cat > mnt/root-a/usr/local/bin/first-boot-setup << 'EOF'
 #!/bin/bash
 # First boot setup for Pi-Star A/B system
 
-# Expand data partition to fill remaining space
+echo "Pi-Star First Boot Setup"
+echo "======================="
+
+# Check if running interactively
+if [ -t 0 ]; then
+    echo ""
+    echo "Default login credentials:"
+    echo "  Username: pi-star"
+    echo "  Password: pi-star"
+    echo ""
+    echo "  Root password: pistar"
+    echo ""
+    echo "SECURITY WARNING: Please change these default passwords!"
+    echo ""
+    
+    # Offer to change passwords
+    read -p "Would you like to change the pi-star password now? (y/N): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        passwd pi-star
+    fi
+    
+    read -p "Would you like to change the root password now? (y/N): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        passwd root
+    fi
+fi
+
+# Mark A/B boot slot as successful
 /usr/local/bin/boot-manager success A
 
 # Mark first boot complete
@@ -258,6 +292,15 @@ echo ""
 echo "SD card image build complete!"
 echo "Image: ${OUTPUT_FILE}.gz"
 echo "Size: $(ls -lh "${OUTPUT_FILE}.gz" | awk '{print $5}')"
+echo ""
+echo "DEFAULT LOGIN CREDENTIALS:"
+echo "  Username: pi-star"
+echo "  Password: pi-star"
+echo ""
+echo "  Root username: root"
+echo "  Root password: pistar"
+echo ""
+echo "⚠️  SECURITY: Change these passwords on first boot!"
 echo ""
 echo "To flash to SD card (4GB+):"
 echo "  gunzip -c ${OUTPUT_FILE}.gz | sudo dd of=/dev/sdX bs=4M status=progress"
