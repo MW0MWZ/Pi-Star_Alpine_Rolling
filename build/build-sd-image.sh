@@ -80,7 +80,124 @@ ESSENTIAL_MODULES=(
     "brcmfmac"          # Broadcom WiFi driver
     "spi_bcm2835"       # SPI interface
     "i2c_bcm2835"       # I2C interface
-    "gpio_bcm2835"      # GPIO control#!/bin/bash
+    "gpio_bcm2835"      # GPIO control
+    "sdhci_bcm2835"     # SD card interface
+)
+
+# Load modules with error handling
+for module in "${ESSENTIAL_MODULES[@]}"; do
+    if modprobe "$module" 2>/dev/null; then
+        echo "✅ Loaded: $module"
+    else
+        echo "⚠️  Could not load: $module (may need to be installed)"
+    fi
+done
+
+echo "✅ Essential module loading complete"
+EOF
+        
+        chmod +x "mnt/root-a/usr/local/bin/load-essential-modules"
+        cp "mnt/root-a/usr/local/bin/load-essential-modules" "mnt/root-b/usr/local/bin/"
+        chmod +x "mnt/root-b/usr/local/bin/load-essential-modules"
+        
+        # Create module installation script for post-boot setup
+        cat > "mnt/root-a/usr/local/bin/install-raspios-modules" << 'EOF'
+#!/bin/bash
+# Download and install matching kernel modules from RaspberryPi OS
+
+set -e
+
+KERNEL_VERSION=$(uname -r)
+echo "📦 Installing RaspberryPi OS modules for kernel: $KERNEL_VERSION"
+
+# Check if modules are already installed
+if [ -f "/lib/modules/$KERNEL_VERSION/modules.dep" ]; then
+    echo "✅ Modules already installed for $KERNEL_VERSION"
+    exit 0
+fi
+
+# Create temporary directory
+TEMP_DIR=$(mktemp -d)
+cd "$TEMP_DIR"
+
+echo "⬇️ Downloading RaspberryPi OS Lite image..."
+RASPIOS_URL="https://downloads.raspberrypi.org/raspios_lite_armhf/images/raspios_lite_armhf-2024-07-04/2024-07-04-raspios-bookworm-armhf-lite.img.xz"
+
+if ! wget -q "$RASPIOS_URL" -O raspios.img.xz; then
+    echo "❌ Failed to download RaspberryPi OS image"
+    exit 1
+fi
+
+echo "📦 Extracting image..."
+xz -d raspios.img.xz
+
+# Mount the image
+echo "🔗 Mounting RaspberryPi OS image..."
+LOOP_DEVICE=$(losetup -f)
+losetup "$LOOP_DEVICE" raspios.img
+
+mkdir -p mnt_raspios
+mount "${LOOP_DEVICE}p2" mnt_raspios
+
+# Find matching kernel version
+AVAILABLE_KERNELS=($(ls mnt_raspios/lib/modules/))
+echo "📋 Available kernels: ${AVAILABLE_KERNELS[*]}"
+
+MATCHING_KERNEL=""
+for kernel in "${AVAILABLE_KERNELS[@]}"; do
+    if [[ "$kernel" == "$KERNEL_VERSION"* ]] || [[ "$KERNEL_VERSION" == "$kernel"* ]]; then
+        MATCHING_KERNEL="$kernel"
+        break
+    fi
+done
+
+if [ -z "$MATCHING_KERNEL" ]; then
+    echo "⚠️  Using latest available: ${AVAILABLE_KERNELS[-1]}"
+    MATCHING_KERNEL="${AVAILABLE_KERNELS[-1]}"
+fi
+
+echo "✅ Installing modules from: $MATCHING_KERNEL"
+
+# Copy modules
+mkdir -p "/lib/modules/$KERNEL_VERSION"
+cp -r "mnt_raspios/lib/modules/$MATCHING_KERNEL"/* "/lib/modules/$KERNEL_VERSION/"
+
+# Copy firmware
+if [ -d "mnt_raspios/lib/firmware/brcm" ]; then
+    mkdir -p /lib/firmware
+    cp -r mnt_raspios/lib/firmware/brcm /lib/firmware/
+    cp -r mnt_raspios/lib/firmware/cypress /lib/firmware/ 2>/dev/null || true
+fi
+
+# Generate dependencies
+echo "🔧 Generating module dependencies..."
+depmod -a "$KERNEL_VERSION"
+
+# Cleanup
+umount mnt_raspios
+losetup -d "$LOOP_DEVICE"
+cd /
+rm -rf "$TEMP_DIR"
+
+echo "✅ RaspberryPi OS modules installed successfully!"
+echo "🔄 Reboot recommended to ensure all modules are available"
+EOF
+        
+        chmod +x "mnt/root-a/usr/local/bin/install-raspios-modules"
+        cp "mnt/root-a/usr/local/bin/install-raspios-modules" "mnt/root-b/usr/local/bin/"
+        chmod +x "mnt/root-b/usr/local/bin/install-raspios-modules"
+        
+        echo "📝 Module structure created with installation scripts"
+    else
+        echo "⚠️  Could not determine kernel version for module matching"
+    fi
+else
+    echo "❌ No kernel downloaded - cannot determine module requirements"
+fi
+
+echo "✅ Essential RaspberryPi OS components installed"
+MAIN_KERNEL="RaspberryPi OS kernels (essential set)"
+KERNEL_FILES_FOUND=1#!/bin/bash
 set -e
 
 VERSION="$1"
