@@ -98,10 +98,8 @@ jobs:
         run: |
           mkdir -p keys
           # Generate temporary keys for test builds (not for production!)
-          openssl genpkey -algorithm RSA -out keys/private.pem -pkcs8 -pass pass:testkey123
-          openssl rsa -pubout -in keys/private.pem -out keys/public.pem -passin pass:testkey123
-          # Remove passphrase for build process
-          openssl rsa -in keys/private.pem -out keys/private.pem -passin pass:testkey123
+          openssl genpkey -algorithm RSA -out keys/private.pem -pkcs8
+          openssl rsa -pubout -in keys/private.pem -out keys/public.pem
           chmod 600 keys/private.pem
           
           echo "⚠️  TEST KEYS GENERATED - NOT FOR PRODUCTION USE!"
