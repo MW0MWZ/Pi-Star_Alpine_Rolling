@@ -5,11 +5,11 @@
 echo "📦 Setting up kernel modules for hardware support..."
 
 # Get the actual kernel version by examining the downloaded kernel
-if [ -f "mnt/boot/kernel8.img" ]; then
+if [ -f "mnt/boot/kernel8.img" ] && [ -s "mnt/boot/kernel8.img" ]; then
     # Extract kernel version from the kernel image
-    KERNEL_VERSION=$(strings mnt/boot/kernel8.img | grep -E "Linux version [0-9].*-v8\+" | head -1 | awk '{print $3}' || echo "unknown")
+    KERNEL_VERSION=$(strings mnt/boot/kernel8.img | grep -E "Linux version [0-9].*-v8\+" | head -1 | awk '{print $3}' 2>/dev/null || echo "unknown")
     
-    if [ "$KERNEL_VERSION" != "unknown" ]; then
+    if [ "$KERNEL_VERSION" != "unknown" ] && [ -n "$KERNEL_VERSION" ]; then
         echo "🔍 Detected kernel version: $KERNEL_VERSION"
         
         # Create modules directory structure  
@@ -146,6 +146,58 @@ echo "📋 Available kernels: ${AVAILABLE_KERNELS[*]}"
 MATCHING_KERNEL=""
 for kernel in "${AVAILABLE_KERNELS[@]}"; do
     if [[ "$kernel" == "$KERNEL_VERSION"* ]] || [[ "$KERNEL_VERSION" == "$kernel"* ]]; then
+        MATCHING_KERNEL="$kernel"
+        break
+    fi
+done
+
+if [ -z "$MATCHING_KERNEL" ]; then
+    echo "⚠️  Using latest available: ${AVAILABLE_KERNELS[-1]}"
+    MATCHING_KERNEL="${AVAILABLE_KERNELS[-1]}"
+fi
+
+echo "✅ Installing modules from: $MATCHING_KERNEL"
+
+# Copy modules
+mkdir -p "/lib/modules/$KERNEL_VERSION"
+cp -r "mnt_raspios/lib/modules/$MATCHING_KERNEL"/* "/lib/modules/$KERNEL_VERSION/"
+
+# Copy firmware
+if [ -d "mnt_raspios/lib/firmware/brcm" ]; then
+    mkdir -p /lib/firmware
+    cp -r mnt_raspios/lib/firmware/brcm /lib/firmware/
+    cp -r mnt_raspios/lib/firmware/cypress /lib/firmware/ 2>/dev/null || true
+fi
+
+# Generate dependencies
+echo "🔧 Generating module dependencies..."
+depmod -a "$KERNEL_VERSION"
+
+# Cleanup
+umount mnt_raspios
+losetup -d "$LOOP_DEVICE"
+cd /
+rm -rf "$TEMP_DIR"
+
+echo "✅ RaspberryPi OS modules installed successfully!"
+echo "🔄 Reboot recommended to ensure all modules are available"
+EOF
+        
+        chmod +x "mnt/root-a/usr/local/bin/install-raspios-modules"
+        cp "mnt/root-a/usr/local/bin/install-raspios-modules" "mnt/root-b/usr/local/bin/"
+        chmod +x "mnt/root-b/usr/local/bin/install-raspios-modules"
+        
+        echo "📝 Module structure created with installation scripts"
+    else
+        echo "⚠️  Could not determine kernel version for module matching"
+    fi
+else
+    echo "❌ No valid kernel downloaded - cannot determine module requirements"
+fi
+
+echo "✅ Essential RaspberryPi OS components installed"
+MAIN_KERNEL="RaspberryPi OS kernels (essential set)"
+KERNEL_FILES_FOUND=1KERNEL_VERSION"* ]] || [[ "$KERNEL_VERSION" == "$kernel"* ]]; then
         MATCHING_KERNEL="$kernel"
         break
     fi
@@ -350,11 +402,11 @@ fi
 if [ "$KERNEL_FILES_FOUND" != "1" ]; then
     # Essential firmware files ONLY (minimal bootloader set)
     ESSENTIAL_FIRMWARE=(
-        "bootcode.bin"      # Pi bootloader (required)
-        "start.elf"         # GPU firmware for Pi 1-3 (required)
-        "start4.elf"        # GPU firmware for Pi 4-5 (required)  
-        "fixup.dat"         # GPU memory config for Pi 1-3 (required)
-        "fixup4.dat"        # GPU memory config for Pi 4-5 (required)
+        "bootcode.bin"
+        "start.elf"
+        "start4.elf"
+        "fixup.dat"
+        "fixup4.dat"
     )
 
     echo "📥 Downloading essential firmware files..."
@@ -366,7 +418,7 @@ if [ "$KERNEL_FILES_FOUND" != "1" ]; then
             FIRMWARE_SUCCESS=1
         else
             echo "❌ CRITICAL: Failed to download $file"
-            rm -f "mnt/boot/$file"  # Remove any partial download
+            rm -f "mnt/boot/$file"
         fi
     done
 
@@ -378,13 +430,6 @@ if [ "$KERNEL_FILES_FOUND" != "1" ]; then
     # Download kernels for Pi models we actually support
     echo "📥 Downloading kernels for supported Pi models..."
 
-    # Define which Pi models we support and their kernels
-    declare -A PI_KERNELS=(
-        ["kernel.img"]="Pi Zero, Pi 1"           # ARMv6
-        ["kernel7.img"]="Pi 2, Pi 3"             # ARMv7
-        ["kernel8.img"]="Pi 3, Pi 4, Pi 5 (64-bit)"  # ARMv8
-    )
-
     # Only download kernels for Pi models we want to support
     SUPPORTED_KERNELS=("kernel.img" "kernel7.img" "kernel8.img")
 
@@ -392,11 +437,11 @@ if [ "$KERNEL_FILES_FOUND" != "1" ]; then
     for kernel in "${SUPPORTED_KERNELS[@]}"; do
         if wget -q -O "mnt/boot/$kernel" "$PI_FIRMWARE_BASE/$kernel"; then
             KERNEL_SIZE=$(ls -lh "mnt/boot/$kernel" | awk '{print $5}')
-            echo "✅ Downloaded: $kernel ($KERNEL_SIZE) - ${PI_KERNELS[$kernel]}"
+            echo "✅ Downloaded: $kernel ($KERNEL_SIZE)"
             KERNEL_SUCCESS=1
         else
             echo "⚠️  Could not download $kernel"
-            rm -f "mnt/boot/$kernel"  # Remove any partial download
+            rm -f "mnt/boot/$kernel"
         fi
     done
 
@@ -410,15 +455,15 @@ if [ "$KERNEL_FILES_FOUND" != "1" ]; then
 
     # Essential device tree files (only for models we support)
     SUPPORTED_DTB_FILES=(
-        "bcm2708-rpi-zero.dtb"         # Pi Zero
-        "bcm2708-rpi-zero-w.dtb"       # Pi Zero W  
-        "bcm2710-rpi-zero-2.dtb"       # Pi Zero 2
-        "bcm2710-rpi-zero-2-w.dtb"     # Pi Zero 2W
-        "bcm2709-rpi-2-b.dtb"          # Pi 2B
-        "bcm2710-rpi-3-b.dtb"          # Pi 3B
-        "bcm2710-rpi-3-b-plus.dtb"     # Pi 3B+
-        "bcm2711-rpi-4-b.dtb"          # Pi 4B
-        "bcm2712-rpi-5-b.dtb"          # Pi 5B (may not exist yet)
+        "bcm2708-rpi-zero.dtb"
+        "bcm2708-rpi-zero-w.dtb"
+        "bcm2710-rpi-zero-2.dtb"
+        "bcm2710-rpi-zero-2-w.dtb"
+        "bcm2709-rpi-2-b.dtb"
+        "bcm2710-rpi-3-b.dtb"
+        "bcm2710-rpi-3-b-plus.dtb"
+        "bcm2711-rpi-4-b.dtb"
+        "bcm2712-rpi-5-b.dtb"
     )
 
     DTB_BASE="$PI_FIRMWARE_BASE"
@@ -429,7 +474,7 @@ if [ "$KERNEL_FILES_FOUND" != "1" ]; then
             DTB_SUCCESS=1
         else
             echo "⚠️  Could not download $dtb (may not exist)"
-            rm -f "mnt/boot/$dtb"  # Remove any partial download
+            rm -f "mnt/boot/$dtb"
         fi
     done
 
@@ -445,22 +490,13 @@ if [ "$KERNEL_FILES_FOUND" != "1" ]; then
 
     # Minimal overlays for Pi-Star digital radio functionality
     PISTAR_ESSENTIAL_OVERLAYS=(
-        # UART overlays (for radio communication)
-        "uart0.dtbo"                   # Primary UART
-        "disable-bt.dtbo"             # Disable Bluetooth to free UART
-        "miniuart-bt.dtbo"            # Mini UART with Bluetooth
-        
-        # SPI overlays (for radio hardware)
-        "spi1-1cs.dtbo"               # SPI1 with 1 chip select
-        
-        # I2C overlays (for displays, sensors)
-        "i2c1.dtbo"                   # I2C1 interface
-        
-        # GPIO overlays
-        "gpio-no-irq.dtbo"            # GPIO without interrupts
-        
-        # Video overlays (minimal)
-        "vc4-fkms-v3d.dtbo"          # Fake KMS (stable video)
+        "uart0.dtbo"
+        "disable-bt.dtbo"
+        "miniuart-bt.dtbo"
+        "spi1-1cs.dtbo"
+        "i2c1.dtbo"
+        "gpio-no-irq.dtbo"
+        "vc4-fkms-v3d.dtbo"
     )
 
     OVERLAY_SUCCESS=0
@@ -470,13 +506,12 @@ if [ "$KERNEL_FILES_FOUND" != "1" ]; then
             OVERLAY_SUCCESS=1
         else
             echo "⚠️  Could not download overlay: $overlay"
-            rm -f "mnt/boot/overlays/$overlay"  # Remove any partial download
+            rm -f "mnt/boot/overlays/$overlay"
         fi
     done
 
     if [ "$OVERLAY_SUCCESS" -eq 0 ]; then
         echo "⚠️  No overlays downloaded - hardware features may be limited"
-        # Remove empty overlays directory
         rmdir mnt/boot/overlays 2>/dev/null || true
     fi
 
