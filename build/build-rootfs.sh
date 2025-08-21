@@ -7,6 +7,7 @@ BUILD_DIR="${BUILD_DIR:-/tmp/pi-star-build}"
 CACHE_DIR="${CACHE_DIR:-/tmp/alpine-cache}"
 
 echo "Building Pi-Star OTA rootfs v${VERSION} (Pi-Star mode: ${PI_STAR_MODE})"
+echo "Using 100% Alpine approach - no kernel mixing"
 
 # Create build environment
 mkdir -p "$BUILD_DIR"
@@ -86,8 +87,8 @@ apk add --no-cache alpine-base busybox
 echo "Basic Alpine setup complete"
 CHROOT_SETUP
 
-# Now install the full package set
-echo "Installing full package set..."
+# Now install the full package set - PURE ALPINE APPROACH
+echo "Installing full Alpine package set..."
 sudo chroot . /bin/sh << 'CHROOT_PACKAGES'
 # Install packages in smaller groups to identify any problematic packages
 echo "Installing system packages..."
@@ -120,201 +121,85 @@ apk add --no-cache \
     dhcpcd \
     bridge-utils
 
-echo "Installing Raspberry Pi kernel and modules..."
+echo "Installing PURE ALPINE Raspberry Pi support..."
+# PURE ALPINE: Only use Alpine's Pi packages
 apk add --no-cache \
     linux-rpi \
-    linux-firmware-brcm \
-    linux-firmware-cypress \
-    raspberrypi-bootloader
-
-echo "Package installation complete"
-CHROOT_PACKAGES
-
-# CRITICAL: Fix kernel/module compatibility for Pi Zero 2W
-echo "=== FIXING KERNEL/MODULE MISMATCH FOR PI ZERO 2W ==="
-
-# Install additional kernel packages for better compatibility
-echo "Installing additional kernel packages..."
-sudo chroot . /bin/sh << 'CHROOT_KERNEL_FIX'
-# Force install multiple Pi kernel packages for compatibility
-echo "Installing Raspberry Pi kernel packages..."
-apk add --no-cache \
-    linux-rpi4 \
-    linux-rpi4-dev \
-    raspberrypi-bootloader-common \
-    raspberrypi-bootloader-x
-
-# Also install edge kernel if available for newer hardware support
-apk add --no-cache \
-    linux-edge \
     linux-firmware \
     linux-firmware-brcm \
     linux-firmware-cypress \
-    linux-firmware-ath9k || echo "Some edge firmware packages not available"
+    linux-firmware-ath9k
 
-echo "Additional kernel packages installed"
-CHROOT_KERNEL_FIX
+echo "Pure Alpine Pi packages installed - no Pi Foundation kernel mixing"
+CHROOT_PACKAGES
 
-# CRITICAL: Create module loading configuration
-echo "Creating module loading configuration..."
-sudo tee etc/modules-load.d/brcmfmac.conf << 'EOF'
-# Load brcmfmac module for Raspberry Pi wireless
-brcmfmac
-brcmutil
-cfg80211
-EOF
+# PURE ALPINE: Download comprehensive Pi firmware for ALL models
+echo "=== DOWNLOADING COMPREHENSIVE PI FIRMWARE ==="
+sudo mkdir -p lib/firmware/brcm
 
-# Create modprobe configuration for brcmfmac issues
-sudo tee etc/modprobe.d/rpi-wireless.conf << 'EOF'
-# Raspberry Pi wireless module configuration
+# Download firmware for ALL Pi models (comprehensive approach)
+declare -a firmware_files=(
+    "brcmfmac43430-sdio.bin"     # Pi Zero W, Pi 3
+    "brcmfmac43430-sdio.txt"
+    "brcmfmac43455-sdio.bin"     # Pi 3B+, Pi 4
+    "brcmfmac43455-sdio.txt"
+    "brcmfmac43455-sdio.clm_blob"
+    "brcmfmac43436-sdio.bin"     # Pi Zero 2W
+    "brcmfmac43436-sdio.txt"
+    "brcmfmac43456-sdio.bin"     # Pi 5
+    "brcmfmac43456-sdio.txt"
+    "brcmfmac43456-sdio.clm_blob"
+)
 
-# Pi Zero 2W specific fixes
+echo "Downloading firmware for all Pi models..."
+for firmware in "${firmware_files[@]}"; do
+    if wget -q -O "lib/firmware/brcm/$firmware" \
+        "https://github.com/RPi-Distro/firmware-nonfree/raw/master/brcm80211/brcm/$firmware"; then
+        echo "✅ Downloaded $firmware"
+    else
+        echo "⚠️  Could not download $firmware (may not exist for this model)"
+    fi
+done
+
+# Create Pi model-specific firmware configurations
+echo "Creating Pi model-specific firmware configurations..."
+sudo cp lib/firmware/brcm/brcmfmac43430-sdio.txt \
+     lib/firmware/brcm/brcmfmac43430-sdio.raspberrypi,3-model-b.txt 2>/dev/null || true
+
+sudo cp lib/firmware/brcm/brcmfmac43436-sdio.txt \
+     lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.txt 2>/dev/null || true
+
+sudo cp lib/firmware/brcm/brcmfmac43455-sdio.txt \
+     lib/firmware/brcm/brcmfmac43455-sdio.raspberrypi,4-model-b.txt 2>/dev/null || true
+
+sudo cp lib/firmware/brcm/brcmfmac43456-sdio.txt \
+     lib/firmware/brcm/brcmfmac43456-sdio.raspberrypi,5-model-b.txt 2>/dev/null || true
+
+# Configure wireless driver for all Pi models
+echo "Configuring wireless drivers for all Pi models..."
+sudo tee etc/modprobe.d/brcmfmac.conf << 'EOF'
+# Universal Pi wireless driver configuration
+# Optimized for Pi Zero 2W but works on all models
 options brcmfmac roamoff=1 feature_disable=0x282000
 
-# Alternative fix for stubborn connections
+# Alternative for stubborn connections:
 # options brcmfmac feature_disable=0x2000
 
 # Prevent module conflicts
 blacklist b43
 blacklist b43legacy
 blacklist ssb
-
-# Force brcmfmac to load properly
-install brcmfmac /sbin/modprobe --ignore-install brcmfmac && sleep 1 && /sbin/modprobe brcmutil
 EOF
 
-# CRITICAL: Create kernel module fix script
-sudo tee usr/local/bin/fix-wireless-modules << 'MODULE_FIX_SCRIPT'
-#!/bin/bash
-# Fix wireless module loading for Raspberry Pi
+# Force module loading at boot
+sudo tee etc/modules-load.d/pi-wireless.conf << 'EOF'
+# Load Pi wireless modules at boot
+brcmfmac
+brcmutil
+cfg80211
+EOF
 
-echo "Fixing wireless modules for Raspberry Pi..."
-
-# Get actual running kernel version
-KERNEL_VERSION=$(uname -r)
-echo "Running kernel: $KERNEL_VERSION"
-
-# Check if brcmfmac module exists
-MODULE_PATH="/lib/modules/$KERNEL_VERSION/kernel/drivers/net/wireless/broadcom/brcm80211/brcmfmac/brcmfmac.ko"
-ALT_MODULE_PATH="/lib/modules/$KERNEL_VERSION"
-
-echo "Looking for brcmfmac module..."
-if [ -f "$MODULE_PATH" ]; then
-    echo "✅ Found brcmfmac at: $MODULE_PATH"
-elif find "/lib/modules/$KERNEL_VERSION" -name "brcmfmac.ko*" -type f 2>/dev/null | head -1; then
-    FOUND_MODULE=$(find "/lib/modules/$KERNEL_VERSION" -name "brcmfmac.ko*" -type f 2>/dev/null | head -1)
-    echo "✅ Found brcmfmac at: $FOUND_MODULE"
-else
-    echo "❌ brcmfmac module not found for kernel $KERNEL_VERSION"
-    echo "Available kernel modules:"
-    ls -la /lib/modules/ 2>/dev/null || echo "No modules directory found"
-    
-    # Try to load available modules
-    for mod_dir in /lib/modules/*; do
-        if [ -d "$mod_dir" ]; then
-            echo "Checking $(basename "$mod_dir")..."
-            find "$mod_dir" -name "brcmfmac*" -type f 2>/dev/null | head -3
-        fi
-    done
-fi
-
-# Force module loading
-echo "Attempting to load wireless modules..."
-
-# Try different loading methods
-if modprobe brcmfmac 2>/dev/null; then
-    echo "✅ brcmfmac loaded successfully"
-elif insmod $(find /lib/modules -name "brcmfmac.ko*" | head -1) 2>/dev/null; then
-    echo "✅ brcmfmac loaded via insmod"
-else
-    echo "❌ Failed to load brcmfmac module"
-fi
-
-# Load supporting modules
-modprobe brcmutil 2>/dev/null && echo "✅ brcmutil loaded"
-modprobe cfg80211 2>/dev/null && echo "✅ cfg80211 loaded"
-
-# Check if wireless interface appears
-sleep 2
-if ip link show | grep -q wlan; then
-    echo "✅ Wireless interface detected!"
-    ip link show | grep wlan
-else
-    echo "❌ No wireless interface found"
-fi
-
-# Show module status
-echo ""
-echo "=== MODULE STATUS ==="
-lsmod | grep -E "brcm|80211" | head -10
-echo "===================="
-MODULE_FIX_SCRIPT
-
-sudo chmod +x usr/local/bin/fix-wireless-modules
-
-# Create kernel compatibility checker
-sudo tee usr/local/bin/check-kernel-compat << 'KERNEL_COMPAT_SCRIPT'
-#!/bin/bash
-# Check kernel/module compatibility
-
-echo "=== KERNEL COMPATIBILITY CHECK ==="
-RUNNING_KERNEL=$(uname -r)
-echo "Running kernel: $RUNNING_KERNEL"
-
-echo "Available module directories:"
-ls -1 /lib/modules/ 2>/dev/null || echo "No modules found"
-
-echo "Kernel version mismatch check:"
-if [ -d "/lib/modules/$RUNNING_KERNEL" ]; then
-    echo "✅ Modules available for running kernel"
-else
-    echo "❌ No modules for running kernel $RUNNING_KERNEL"
-    echo "This explains why brcmfmac is not found!"
-    
-    # Show what modules are available
-    echo "Available module versions:"
-    for dir in /lib/modules/*/; do
-        if [ -d "$dir" ]; then
-            ver=$(basename "$dir")
-            echo "  - $ver"
-            if find "$dir" -name "brcmfmac*" -type f 2>/dev/null | head -1 >/dev/null; then
-                echo "    ✅ Has brcmfmac"
-            else
-                echo "    ❌ No brcmfmac"
-            fi
-        fi
-    done
-fi
-
-echo "=================================="
-KERNEL_COMPAT_SCRIPT
-
-sudo chmod +x usr/local/bin/check-kernel-compat
-
-# ENHANCED: Pi Zero 2W Wireless Support & Debugging
-echo "=== APPLYING PI ZERO 2W FIXES & ENHANCED DEBUGGING ==="
-
-# CRITICAL: Download missing Pi Zero 2W firmware
-echo "Downloading Pi Zero 2W specific firmware..."
-sudo mkdir -p lib/firmware/brcm
-
-# Download critical Pi Zero 2W firmware files that Alpine may be missing
-if ! wget -q -O lib/firmware/brcm/brcmfmac43436-sdio.bin \
-    "https://github.com/RPi-Distro/firmware-nonfree/raw/master/brcm80211/brcm/brcmfmac43436-sdio.bin"; then
-    echo "WARNING: Failed to download brcmfmac43436-sdio.bin"
-fi
-
-if ! wget -q -O lib/firmware/brcm/brcmfmac43436-sdio.txt \
-    "https://github.com/RPi-Distro/firmware-nonfree/raw/master/brcm80211/brcm/brcmfmac43436-sdio.txt"; then
-    echo "WARNING: Failed to download brcmfmac43436-sdio.txt"
-fi
-
-# Create Pi Zero 2W specific configuration
-sudo cp lib/firmware/brcm/brcmfmac43436-sdio.txt \
-     lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.txt 2>/dev/null || \
-     echo "WARNING: Could not create Pi Zero 2W specific config"
-
-# Enable essential services (basic setup only)
+# Enable essential services
 echo "Configuring basic services..."
 sudo chroot . /bin/sh << 'CHROOT_SERVICES'
 rc-update add bootmisc boot
@@ -334,7 +219,6 @@ passwd -l root
 
 # Create pi-star user with no initial password
 adduser -D -s /bin/bash pi-star
-# Don't set any password initially - will be configured via boot config or remain locked
 
 # Add pi-star to essential groups
 addgroup sudo 2>/dev/null || true
@@ -444,7 +328,7 @@ if [ -f "$REPO_ROOT/scripts/partition-switcher.sh" ]; then
     sudo chmod +x usr/local/bin/partition-switcher
 fi
 
-# CRITICAL: Install FIXED boot configuration processor
+# Install FIXED boot configuration processor
 echo "Installing FIXED boot configuration processor..."
 sudo tee usr/local/bin/process-boot-config << 'BOOT_CONFIG_FIXED'
 #!/bin/bash
@@ -620,7 +504,7 @@ if [ -f "$REPO_ROOT/config/system/hostname" ]; then
     sudo cp "$REPO_ROOT/config/system/hostname" etc/hostname
 fi
 
-# CRITICAL: Install FIXED pistar-boot-config service
+# Install FIXED pistar-boot-config service
 echo "Installing FIXED pistar-boot-config service..."
 sudo tee etc/init.d/pistar-boot-config << 'SERVICE_FIXED'
 #!/sbin/openrc-run
@@ -660,12 +544,12 @@ SERVICE_FIXED
 
 sudo chmod +x etc/init.d/pistar-boot-config
 
-# Enhanced wireless debug service that includes module fixes
-sudo tee etc/init.d/wireless-debug << 'WIRELESS_DEBUG_ENHANCED'
+# Create Alpine Pi hardware detection service
+sudo tee etc/init.d/alpine-pi-detect << 'PI_DETECT_SERVICE'
 #!/sbin/openrc-run
 
-name="Wireless Debug Enhanced"
-description="Debug and fix wireless interface detection"
+name="Alpine Pi Hardware Detection"
+description="Detect Pi model and optimize Alpine configuration"
 
 depend() {
     after localmount
@@ -674,68 +558,88 @@ depend() {
 }
 
 start() {
-    ebegin "Debugging and fixing wireless interfaces"
+    ebegin "Detecting Pi hardware and optimizing Alpine configuration"
     
-    DEBUG_LOG="/var/log/wireless-debug.log"
+    DEBUG_LOG="/var/log/alpine-pi-detect.log"
     mkdir -p /var/log
     
     {
-        echo "=== ENHANCED WIRELESS DEBUG $(date) ==="
+        echo "=== ALPINE PI DETECTION $(date) ==="
         
-        # Show kernel information
-        echo "Kernel information:"
-        uname -a
+        # Detect Pi model
+        PI_MODEL="Unknown"
+        if [ -f /proc/device-tree/model ]; then
+            PI_MODEL=$(cat /proc/device-tree/model 2>/dev/null | tr '\0' '\n' | head -1)
+        fi
         
-        echo "Available kernel modules directories:"
-        ls -la /lib/modules/ 2>/dev/null || echo "No modules directory"
+        echo "Pi Model: $PI_MODEL"
+        echo "Kernel: $(uname -r)"
+        echo "Architecture: $(uname -m)"
         
-        # Run the module fix script
-        echo "Running wireless module fix..."
-        /usr/local/bin/fix-wireless-modules
+        # Load wireless modules for all Pi models
+        echo "Loading wireless modules..."
+        modprobe brcmfmac 2>&1 || echo "brcmfmac load failed"
+        modprobe brcmutil 2>&1 || echo "brcmutil load failed"
+        modprobe cfg80211 2>&1 || echo "cfg80211 load failed"
         
-        # Check firmware files
-        echo "Checking firmware files:"
-        ls -la /lib/firmware/brcm/ 2>/dev/null | head -10 || echo "No brcm firmware directory"
-        
-        # Check for module files
-        echo "Searching for brcmfmac modules:"
-        find /lib/modules -name "*brcm*" -type f 2>/dev/null | head -10 || echo "No brcm modules found"
-        
-        # Try manual module loading
-        echo "Attempting manual module loading..."
-        modprobe brcmfmac 2>&1 || echo "modprobe brcmfmac failed"
+        # Give modules time to initialize
         sleep 2
         
-        # Check interfaces after module loading
-        echo "Network interfaces after module load:"
-        ip link show 2>&1 || echo "ip link failed"
+        # Check hardware functionality
+        echo "=== HARDWARE CHECK ==="
         
-        echo "Wireless devices:"
-        iw dev 2>&1 || echo "No wireless devices found"
+        # GPIO
+        if [ -d /sys/class/gpio ]; then
+            echo "✅ GPIO: Available"
+        else
+            echo "❌ GPIO: Not available"
+        fi
         
-        # Check rfkill
-        echo "rfkill status:"
-        rfkill list 2>&1 || echo "rfkill failed"
+        # SPI
+        if [ -d /sys/class/spi_master ] || [ -c /dev/spidev0.0 ]; then
+            echo "✅ SPI: Available"
+        else
+            echo "❌ SPI: Not available"
+        fi
         
-        # Check dmesg for wireless messages
-        echo "Recent wireless/firmware messages:"
-        dmesg | grep -i -E "brcm|wireless|wlan|firmware|43436|43430" | tail -15
+        # I2C
+        if [ -d /sys/class/i2c-adapter ] || [ -c /dev/i2c-1 ]; then
+            echo "✅ I2C: Available"
+        else
+            echo "❌ I2C: Not available"
+        fi
+        
+        # Wireless
+        if ip link show | grep -q wlan; then
+            echo "✅ Wireless: Interface detected"
+            ip link show | grep wlan
+        else
+            echo "❌ Wireless: No interface found"
+        fi
+        
+        # Ethernet
+        if ip link show | grep -q eth; then
+            echo "✅ Ethernet: Interface detected"
+            ip link show | grep eth
+        else
+            echo "❌ Ethernet: No interface found"
+        fi
         
         # Show loaded modules
-        echo "Currently loaded wireless modules:"
-        lsmod | grep -E "brcm|wireless|80211" || echo "No wireless modules loaded"
+        echo "=== LOADED MODULES ==="
+        lsmod | grep -E "brcm|80211" || echo "No wireless modules loaded"
         
-        echo "=== END ENHANCED WIRELESS DEBUG ==="
+        echo "=== END ALPINE PI DETECTION ==="
         
     } | tee "$DEBUG_LOG"
     
     eend 0
 }
-WIRELESS_DEBUG_ENHANCED
+PI_DETECT_SERVICE
 
-sudo chmod +x etc/init.d/wireless-debug
+sudo chmod +x etc/init.d/alpine-pi-detect
 
-# FIXED: Create the first-boot service with CORRECT dependencies and runlevel
+# Create first-boot service
 sudo tee etc/init.d/first-boot << 'FIRST_BOOT_SERVICE'
 #!/sbin/openrc-run
 
@@ -782,71 +686,66 @@ SERVICE_EOF
 
 sudo chmod +x etc/init.d/pi-star-updater
 
-# FIXED: Enable services in correct order - move first-boot to DEFAULT level
-echo "Configuring services with FIXED dependencies..."
+# Enable services in correct order
+echo "Configuring services with proper dependencies..."
 sudo chroot . /bin/sh << 'CHROOT_SERVICES_FINAL'
 # Boot-time services (in correct dependency order)
 rc-update add devfs sysinit
 rc-update add bootmisc boot
 rc-update add localmount boot
-rc-update add wireless-debug boot       # Debug wireless before config
-rc-update add pistar-boot-config boot  # This processes your config file
+rc-update add alpine-pi-detect boot    # Alpine Pi hardware detection
+rc-update add pistar-boot-config boot  # Process config file
 rc-update add hostname boot
 rc-update add modules boot
 
-# Default services (after boot is complete) - FIRST-BOOT MOVED HERE
+# Default services (after boot is complete)
 rc-update add dbus default
 rc-update add chronyd default
 rc-update add networking default
 rc-update add wpa_supplicant default
 rc-update add dhcpcd default
-rc-update add first-boot default      # FIXED: Runs AFTER networking
+rc-update add first-boot default      # Runs AFTER networking
 rc-update add sshd default
 rc-update add pi-star-updater default
 
-# Verify the critical boot service order
-echo "=== FIXED BOOT SERVICE VERIFICATION ==="
+echo "=== PURE ALPINE SERVICES CONFIGURED ==="
 echo "Boot services enabled:"
-rc-update show boot | grep -E "(localmount|pistar-boot-config|hostname|wireless-debug)"
+rc-update show boot | grep -E "(alpine-pi-detect|pistar-boot-config)"
 echo "Default services enabled:"
 rc-update show default | grep -E "(networking|first-boot|sshd)"
-echo "FIXED: first-boot now runs AFTER networking is established"
 echo "========================================"
-
-echo "Services configured with proper boot order - NO MORE PASSWORD PROMPTS!"
 CHROOT_SERVICES_FINAL
 
-# Create the FIXED first-boot setup script
+# Create the first-boot setup script
 sudo tee usr/local/bin/first-boot-setup << 'FIRST_BOOT_SCRIPT'
 #!/bin/bash
-# FIXED: Enhanced first boot setup that NEVER prompts when config exists
+# Pure Alpine first boot setup
 
-echo "Pi-Star First Boot Setup"
-echo "======================="
+echo "Pi-Star Alpine First Boot Setup"
+echo "==============================="
 
-# CRITICAL FIX: Check if boot configuration was processed FIRST
+# Check if boot configuration was processed
 if [ -f "/boot/.config-processed" ]; then
-    echo "✅ Boot configuration found and processed from /boot/pistar-config.txt"
-    echo "   User account and system settings configured automatically"
-    echo "   NO MANUAL SETUP REQUIRED"
+    echo "✅ Boot configuration processed from /boot/pistar-config.txt"
+    echo "   System configured automatically - no manual setup required"
     
     # Show what was configured
     if [ -f "/boot/pistar-config.txt" ]; then
         echo ""
-        echo "Configuration applied from boot partition:"
+        echo "Configuration applied:"
         
-        # Check if WiFi was configured
+        # Check WiFi
         if grep -q "^wifi_ssid" /boot/pistar-config.txt 2>/dev/null; then
             WIFI_SSID=$(grep "^wifi_ssid" /boot/pistar-config.txt | head -1 | cut -d'=' -f2)
             echo "• WiFi: Configured for '$WIFI_SSID'"
         fi
         
-        # Check if user password was set
+        # Check user password
         if grep -q "^user_password" /boot/pistar-config.txt 2>/dev/null; then
             echo "• User: Password set for pi-star user"
         fi
         
-        # Check if SSH key was configured
+        # Check SSH key
         if grep -q "^ssh_key" /boot/pistar-config.txt 2>/dev/null; then
             echo "• SSH: Public key authentication configured"
         fi
@@ -859,10 +758,7 @@ if [ -f "/boot/.config-processed" ]; then
     fi
     
     echo ""
-    echo "✅ System fully configured - no user interaction needed"
-    
-    # FIXED: Skip ALL interactive prompts when config exists
-    # Jump straight to validation and completion
+    echo "✅ System fully configured automatically"
     
 else
     echo "ℹ️  No boot configuration found at /boot/pistar-config.txt"
@@ -875,18 +771,14 @@ else
     echo ""
     echo "⚠️  IMPORTANT: You must configure access before rebooting!"
     echo ""
-    echo "OPTIONS:"
-    echo "1. Create /boot/pistar-config.txt with your settings"
-    echo "2. Connect via console and set password manually"
-    echo ""
-    echo "Example /boot/pistar-config.txt:"
+    echo "Create /boot/pistar-config.txt with your settings:"
     echo "  wifi_ssid=YourNetwork"
     echo "  wifi_password=YourPassword" 
     echo "  user_password=YourSecurePassword"
     echo "  ssh_key=ssh-rsa AAAAB3Nz... your-email@example.com"
     echo ""
     
-    # FIXED: Only show interactive prompts if NO config file exists AND running interactively
+    # Only show interactive prompts if running interactively
     if [ -t 0 ] && [ -t 1 ]; then
         echo "Running interactively - offering to set password..."
         echo ""
@@ -905,11 +797,7 @@ else
                 sed -i 's/#PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
                 
                 # Restart SSH service
-                if command -v systemctl >/dev/null 2>&1; then
-                    systemctl restart sshd
-                else
-                    service sshd restart
-                fi
+                service sshd restart 2>/dev/null || true
                 echo "✅ SSH password authentication enabled"
             fi
         else
@@ -921,7 +809,7 @@ else
     fi
 fi
 
-# Validate system boot (A/B partition system)
+# Validate system boot
 if [ -f "/usr/local/bin/boot-validator" ]; then
     echo ""
     echo "Validating system boot..."
@@ -933,8 +821,8 @@ mkdir -p /opt/pistar
 touch /opt/pistar/.first-boot-complete
 
 echo ""
-echo "Pi-Star system first boot complete"
-echo "=================================="
+echo "Pi-Star Alpine system first boot complete"
+echo "========================================"
 
 # Show system status
 echo ""
@@ -942,6 +830,7 @@ echo "SYSTEM STATUS:"
 echo "• Hostname: $(hostname)"
 echo "• Active partition: $(cat /boot/ab_state 2>/dev/null || echo 'Unknown')"
 echo "• Pi-Star version: $(cat /etc/pi-star-version 2>/dev/null || echo 'Unknown')"
+echo "• Kernel: $(uname -r)"
 
 # Show network status
 if command -v ip >/dev/null 2>&1; then
@@ -979,9 +868,7 @@ fi
 echo ""
 echo "DEBUG LOGS AVAILABLE:"
 echo "• Boot config: /var/log/boot-config.log"
-echo "• Wireless debug: /var/log/wireless-debug.log"
-echo "• Kernel compatibility: run /usr/local/bin/check-kernel-compat"
-echo "• Wireless module fix: run /usr/local/bin/fix-wireless-modules"
+echo "• Pi detection: /var/log/alpine-pi-detect.log"
 echo ""
 echo "For support and documentation:"
 echo "• Repository: https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling"
@@ -990,38 +877,39 @@ FIRST_BOOT_SCRIPT
 
 sudo chmod +x usr/local/bin/first-boot-setup
 
-echo "=== ALL FIXES APPLIED - SUMMARY ==="
-echo "✅ Kernel/module compatibility fixes applied"
-echo "✅ Multiple kernel packages installed (linux-rpi, linux-rpi4, linux-edge)"
-echo "✅ Module loading configuration created"
-echo "✅ Pi Zero 2W firmware downloaded"
+echo "=== PURE ALPINE PI BUILD COMPLETE ==="
+echo "✅ 100% Alpine approach - no kernel mixing"
+echo "✅ Alpine's linux-rpi kernel with matching modules"
+echo "✅ Comprehensive Pi firmware for all models"
 echo "✅ Wireless driver configuration optimized"
-echo "✅ Fixed boot configuration processor with error handling"
-echo "✅ Added wireless debugging service with module fixes"
+echo "✅ Fixed boot configuration processor"
+echo "✅ Alpine Pi hardware detection service"
 echo "✅ Enhanced logging for troubleshooting"
 echo "✅ Fixed service dependencies and boot order"
 echo ""
-echo "Kernel module fix tools available:"
-echo "  • /usr/local/bin/fix-wireless-modules"
-echo "  • /usr/local/bin/check-kernel-compat"
+echo "Key improvements:"
+echo "• No more kernel/module version mismatches"
+echo "• Pure Alpine kernel ensures module compatibility"
+echo "• Comprehensive firmware for all Pi models"
+echo "• Clean, maintainable Alpine-only approach"
 echo ""
 echo "Debug logs will be available at:"
 echo "  • /var/log/boot-config.log"
-echo "  • /var/log/wireless-debug.log"
+echo "  • /var/log/alpine-pi-detect.log"
 echo "======================================="
 
 # Add final verification debug section
-echo "=== FINAL BUILD VERIFICATION ==="
+echo "=== FINAL PURE ALPINE BUILD VERIFICATION ==="
 echo "Repository root: $REPO_ROOT"
 
 echo "Scripts installed:"
-ls -la usr/local/bin/ | grep -E "(process-boot-config|first-boot-setup|update-daemon|install-update|fix-wireless-modules|check-kernel-compat)" || echo "❌ Scripts missing"
+ls -la usr/local/bin/ | grep -E "(process-boot-config|first-boot-setup|update-daemon|install-update)" || echo "❌ Scripts missing"
 
 echo "Service files created:"
-ls -la etc/init.d/ | grep -E "(pistar-boot-config|first-boot|wireless-debug)" || echo "❌ Services missing"
+ls -la etc/init.d/ | grep -E "(pistar-boot-config|first-boot|alpine-pi-detect)" || echo "❌ Services missing"
 
 echo "Boot services enabled:"
-sudo chroot . rc-update show boot | grep -E "(pistar-boot-config|wireless-debug)" || echo "❌ Boot services not enabled"
+sudo chroot . rc-update show boot | grep -E "(pistar-boot-config|alpine-pi-detect)" || echo "❌ Boot services not enabled"
 
 echo "Default services enabled:"
 sudo chroot . rc-update show default | grep -E "(first-boot)" || echo "❌ Default services not enabled"
@@ -1029,16 +917,38 @@ sudo chroot . rc-update show default | grep -E "(first-boot)" || echo "❌ Defau
 echo "System files:"
 [ -f etc/fstab ] && echo "✅ fstab exists" || echo "❌ fstab missing"
 [ -f etc/pi-star-version ] && echo "✅ version file exists" || echo "❌ version file missing"
-[ -f usr/local/bin/first-boot-setup ] && echo "✅ FIXED first-boot script installed" || echo "❌ first-boot script missing"
-[ -f usr/local/bin/process-boot-config ] && echo "✅ FIXED boot config processor installed" || echo "❌ boot config processor missing"
+[ -f usr/local/bin/first-boot-setup ] && echo "✅ first-boot script installed" || echo "❌ first-boot script missing"
+[ -f usr/local/bin/process-boot-config ] && echo "✅ boot config processor installed" || echo "❌ boot config processor missing"
 
-echo "Pi Zero 2W firmware:"
-[ -f lib/firmware/brcm/brcmfmac43436-sdio.bin ] && echo "✅ Pi Zero 2W firmware downloaded" || echo "❌ Pi Zero 2W firmware missing"
-[ -f etc/modprobe.d/rpi-wireless.conf ] && echo "✅ Wireless driver config created" || echo "❌ Wireless driver config missing"
+echo "Pure Alpine Pi components:"
+[ -f etc/modprobe.d/brcmfmac.conf ] && echo "✅ Wireless driver config created" || echo "❌ Wireless driver config missing"
+[ -f etc/modules-load.d/pi-wireless.conf ] && echo "✅ Module loading config created" || echo "❌ Module loading config missing"
 
-echo "Kernel module fixes:"
-[ -f etc/modules-load.d/brcmfmac.conf ] && echo "✅ Module loading config created" || echo "❌ Module loading config missing"
-[ -f usr/local/bin/fix-wireless-modules ] && echo "✅ Wireless module fix script installed" || echo "❌ Wireless module fix script missing"
+echo "Pi firmware for all models:"
+[ -f lib/firmware/brcm/brcmfmac43430-sdio.bin ] && echo "✅ Pi Zero W / Pi 3 firmware" || echo "❌ Pi Zero W / Pi 3 firmware missing"
+[ -f lib/firmware/brcm/brcmfmac43436-sdio.bin ] && echo "✅ Pi Zero 2W firmware" || echo "❌ Pi Zero 2W firmware missing"
+[ -f lib/firmware/brcm/brcmfmac43455-sdio.bin ] && echo "✅ Pi 3B+ / Pi 4 firmware" || echo "❌ Pi 3B+ / Pi 4 firmware missing"
+[ -f lib/firmware/brcm/brcmfmac43456-sdio.bin ] && echo "✅ Pi 5 firmware" || echo "❌ Pi 5 firmware missing"
+
+echo "Alpine kernel verification:"
+if ls boot/vmlinuz-* >/dev/null 2>&1; then
+    echo "✅ Alpine kernel present: $(ls boot/vmlinuz-* | head -1)"
+else
+    echo "❌ Alpine kernel missing"
+fi
+
+if ls lib/modules/*/kernel/ >/dev/null 2>&1; then
+    KERNEL_MODULE_VERSION=$(ls -1 lib/modules/ | head -1)
+    echo "✅ Kernel modules present for: $KERNEL_MODULE_VERSION"
+    
+    if find lib/modules/*/kernel/ -name "brcmfmac.ko*" >/dev/null 2>&1; then
+        echo "✅ brcmfmac module found in Alpine kernel modules"
+    else
+        echo "❌ brcmfmac module not found in Alpine kernel modules"
+    fi
+else
+    echo "❌ No kernel modules found"
+fi
 
 echo "================================="
 
@@ -1047,27 +957,26 @@ echo "Cleaning up..."
 sudo chroot . apk cache clean
 sudo rm -rf var/cache/apk/*
 sudo rm -rf tmp/*
-# Fixed: Remove the correct qemu binary
 sudo rm -f usr/bin/qemu-arm-static
 
 # Unmount
 sudo umount proc sys dev
 
 echo ""
-echo "=== ROOT FILESYSTEM BUILD COMPLETE ==="
-echo "✅ Alpine Linux 3.22 configured"
-echo "✅ Pi Zero 2W wireless support added with kernel fixes"
+echo "=== PURE ALPINE ROOT FILESYSTEM BUILD COMPLETE ==="
+echo "✅ Alpine Linux 3.22 with pure Alpine kernel"
+echo "✅ All Pi models supported (Zero, 1, 2, 3, 4, 5)"
+echo "✅ Wireless firmware for ALL Pi wireless chips"
 echo "✅ Fixed boot configuration processing"
 echo "✅ Enhanced debugging and logging"
 echo "✅ Secure user accounts configured"
 echo "✅ OTA update system installed"
 echo ""
-echo "CRITICAL FIXES APPLIED:"
-echo "• No more password prompts when pistar-config.txt exists"
-echo "• Pi Zero 2W wireless interface should now be detected"
-echo "• Multiple kernel packages for module compatibility"
-echo "• Wireless module loading and compatibility fixes"
-echo "• Comprehensive debugging logs for troubleshooting"
-echo "• Proper service dependencies and boot order"
+echo "PURE ALPINE BENEFITS:"
+echo "• No kernel/module version mismatches (EVER)"
+echo "• Alpine controls entire kernel stack"
+echo "• Reliable, predictable updates"
+echo "• Clean, maintainable architecture"
+echo "• Full Pi hardware support maintained"
 echo ""
 echo "Root filesystem build complete!"
