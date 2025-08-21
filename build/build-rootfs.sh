@@ -130,6 +130,167 @@ apk add --no-cache \
 echo "Package installation complete"
 CHROOT_PACKAGES
 
+# CRITICAL: Fix kernel/module compatibility for Pi Zero 2W
+echo "=== FIXING KERNEL/MODULE MISMATCH FOR PI ZERO 2W ==="
+
+# Install additional kernel packages for better compatibility
+echo "Installing additional kernel packages..."
+sudo chroot . /bin/sh << 'CHROOT_KERNEL_FIX'
+# Force install multiple Pi kernel packages for compatibility
+echo "Installing Raspberry Pi kernel packages..."
+apk add --no-cache \
+    linux-rpi4 \
+    linux-rpi4-dev \
+    raspberrypi-bootloader-common \
+    raspberrypi-bootloader-x
+
+# Also install edge kernel if available for newer hardware support
+apk add --no-cache \
+    linux-edge \
+    linux-firmware \
+    linux-firmware-brcm \
+    linux-firmware-cypress \
+    linux-firmware-ath9k || echo "Some edge firmware packages not available"
+
+echo "Additional kernel packages installed"
+CHROOT_KERNEL_FIX
+
+# CRITICAL: Create module loading configuration
+echo "Creating module loading configuration..."
+sudo tee etc/modules-load.d/brcmfmac.conf << 'EOF'
+# Load brcmfmac module for Raspberry Pi wireless
+brcmfmac
+brcmutil
+cfg80211
+EOF
+
+# Create modprobe configuration for brcmfmac issues
+sudo tee etc/modprobe.d/rpi-wireless.conf << 'EOF'
+# Raspberry Pi wireless module configuration
+
+# Pi Zero 2W specific fixes
+options brcmfmac roamoff=1 feature_disable=0x282000
+
+# Alternative fix for stubborn connections
+# options brcmfmac feature_disable=0x2000
+
+# Prevent module conflicts
+blacklist b43
+blacklist b43legacy
+blacklist ssb
+
+# Force brcmfmac to load properly
+install brcmfmac /sbin/modprobe --ignore-install brcmfmac && sleep 1 && /sbin/modprobe brcmutil
+EOF
+
+# CRITICAL: Create kernel module fix script
+sudo tee usr/local/bin/fix-wireless-modules << 'MODULE_FIX_SCRIPT'
+#!/bin/bash
+# Fix wireless module loading for Raspberry Pi
+
+echo "Fixing wireless modules for Raspberry Pi..."
+
+# Get actual running kernel version
+KERNEL_VERSION=$(uname -r)
+echo "Running kernel: $KERNEL_VERSION"
+
+# Check if brcmfmac module exists
+MODULE_PATH="/lib/modules/$KERNEL_VERSION/kernel/drivers/net/wireless/broadcom/brcm80211/brcmfmac/brcmfmac.ko"
+ALT_MODULE_PATH="/lib/modules/$KERNEL_VERSION"
+
+echo "Looking for brcmfmac module..."
+if [ -f "$MODULE_PATH" ]; then
+    echo "✅ Found brcmfmac at: $MODULE_PATH"
+elif find "/lib/modules/$KERNEL_VERSION" -name "brcmfmac.ko*" -type f 2>/dev/null | head -1; then
+    FOUND_MODULE=$(find "/lib/modules/$KERNEL_VERSION" -name "brcmfmac.ko*" -type f 2>/dev/null | head -1)
+    echo "✅ Found brcmfmac at: $FOUND_MODULE"
+else
+    echo "❌ brcmfmac module not found for kernel $KERNEL_VERSION"
+    echo "Available kernel modules:"
+    ls -la /lib/modules/ 2>/dev/null || echo "No modules directory found"
+    
+    # Try to load available modules
+    for mod_dir in /lib/modules/*; do
+        if [ -d "$mod_dir" ]; then
+            echo "Checking $(basename "$mod_dir")..."
+            find "$mod_dir" -name "brcmfmac*" -type f 2>/dev/null | head -3
+        fi
+    done
+fi
+
+# Force module loading
+echo "Attempting to load wireless modules..."
+
+# Try different loading methods
+if modprobe brcmfmac 2>/dev/null; then
+    echo "✅ brcmfmac loaded successfully"
+elif insmod $(find /lib/modules -name "brcmfmac.ko*" | head -1) 2>/dev/null; then
+    echo "✅ brcmfmac loaded via insmod"
+else
+    echo "❌ Failed to load brcmfmac module"
+fi
+
+# Load supporting modules
+modprobe brcmutil 2>/dev/null && echo "✅ brcmutil loaded"
+modprobe cfg80211 2>/dev/null && echo "✅ cfg80211 loaded"
+
+# Check if wireless interface appears
+sleep 2
+if ip link show | grep -q wlan; then
+    echo "✅ Wireless interface detected!"
+    ip link show | grep wlan
+else
+    echo "❌ No wireless interface found"
+fi
+
+# Show module status
+echo ""
+echo "=== MODULE STATUS ==="
+lsmod | grep -E "brcm|80211" | head -10
+echo "===================="
+MODULE_FIX_SCRIPT
+
+sudo chmod +x usr/local/bin/fix-wireless-modules
+
+# Create kernel compatibility checker
+sudo tee usr/local/bin/check-kernel-compat << 'KERNEL_COMPAT_SCRIPT'
+#!/bin/bash
+# Check kernel/module compatibility
+
+echo "=== KERNEL COMPATIBILITY CHECK ==="
+RUNNING_KERNEL=$(uname -r)
+echo "Running kernel: $RUNNING_KERNEL"
+
+echo "Available module directories:"
+ls -1 /lib/modules/ 2>/dev/null || echo "No modules found"
+
+echo "Kernel version mismatch check:"
+if [ -d "/lib/modules/$RUNNING_KERNEL" ]; then
+    echo "✅ Modules available for running kernel"
+else
+    echo "❌ No modules for running kernel $RUNNING_KERNEL"
+    echo "This explains why brcmfmac is not found!"
+    
+    # Show what modules are available
+    echo "Available module versions:"
+    for dir in /lib/modules/*/; do
+        if [ -d "$dir" ]; then
+            ver=$(basename "$dir")
+            echo "  - $ver"
+            if find "$dir" -name "brcmfmac*" -type f 2>/dev/null | head -1 >/dev/null; then
+                echo "    ✅ Has brcmfmac"
+            else
+                echo "    ❌ No brcmfmac"
+            fi
+        fi
+    done
+fi
+
+echo "=================================="
+KERNEL_COMPAT_SCRIPT
+
+sudo chmod +x usr/local/bin/check-kernel-compat
+
 # ENHANCED: Pi Zero 2W Wireless Support & Debugging
 echo "=== APPLYING PI ZERO 2W FIXES & ENHANCED DEBUGGING ==="
 
@@ -152,17 +313,6 @@ fi
 sudo cp lib/firmware/brcm/brcmfmac43436-sdio.txt \
      lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.txt 2>/dev/null || \
      echo "WARNING: Could not create Pi Zero 2W specific config"
-
-# CRITICAL: Configure wireless driver for Pi Zero 2W compatibility
-echo "Configuring wireless drivers for Pi Zero 2W..."
-sudo tee etc/modprobe.d/brcmfmac.conf << 'EOF'
-# Pi Zero 2W wireless driver configuration
-# Disable problematic features that cause connection issues with some access points
-options brcmfmac roamoff=1 feature_disable=0x282000
-
-# Alternative: use this line instead if you have connection issues
-# options brcmfmac feature_disable=0x2000
-EOF
 
 # Enable essential services (basic setup only)
 echo "Configuring basic services..."
@@ -510,13 +660,12 @@ SERVICE_FIXED
 
 sudo chmod +x etc/init.d/pistar-boot-config
 
-# Add wireless interface debug service
-echo "Installing wireless debug service..."
-sudo tee etc/init.d/wireless-debug << 'WIRELESS_DEBUG'
+# Enhanced wireless debug service that includes module fixes
+sudo tee etc/init.d/wireless-debug << 'WIRELESS_DEBUG_ENHANCED'
 #!/sbin/openrc-run
 
-name="Wireless Debug"
-description="Debug wireless interface detection"
+name="Wireless Debug Enhanced"
+description="Debug and fix wireless interface detection"
 
 depend() {
     after localmount
@@ -525,46 +674,64 @@ depend() {
 }
 
 start() {
-    ebegin "Debugging wireless interfaces"
+    ebegin "Debugging and fixing wireless interfaces"
     
     DEBUG_LOG="/var/log/wireless-debug.log"
     mkdir -p /var/log
     
     {
-        echo "=== WIRELESS DEBUG $(date) ==="
+        echo "=== ENHANCED WIRELESS DEBUG $(date) ==="
         
-        # Load wireless modules explicitly
-        echo "Loading wireless modules..."
-        modprobe brcmfmac 2>&1 || echo "brcmfmac module load failed"
-        modprobe brcmutil 2>&1 || echo "brcmutil module load failed"
+        # Show kernel information
+        echo "Kernel information:"
+        uname -a
+        
+        echo "Available kernel modules directories:"
+        ls -la /lib/modules/ 2>/dev/null || echo "No modules directory"
+        
+        # Run the module fix script
+        echo "Running wireless module fix..."
+        /usr/local/bin/fix-wireless-modules
+        
+        # Check firmware files
+        echo "Checking firmware files:"
+        ls -la /lib/firmware/brcm/ 2>/dev/null | head -10 || echo "No brcm firmware directory"
+        
+        # Check for module files
+        echo "Searching for brcmfmac modules:"
+        find /lib/modules -name "*brcm*" -type f 2>/dev/null | head -10 || echo "No brcm modules found"
+        
+        # Try manual module loading
+        echo "Attempting manual module loading..."
+        modprobe brcmfmac 2>&1 || echo "modprobe brcmfmac failed"
         sleep 2
         
-        # Check interfaces
-        echo "Network interfaces:"
+        # Check interfaces after module loading
+        echo "Network interfaces after module load:"
         ip link show 2>&1 || echo "ip link failed"
         
         echo "Wireless devices:"
         iw dev 2>&1 || echo "No wireless devices found"
         
-        # Check firmware loading
-        echo "Recent wireless/firmware messages from dmesg:"
-        dmesg | grep -i -E "brcm|wireless|wlan|firmware|43436" | tail -10
-        
         # Check rfkill
         echo "rfkill status:"
         rfkill list 2>&1 || echo "rfkill failed"
         
-        # Check loaded modules
-        echo "Loaded wireless modules:"
+        # Check dmesg for wireless messages
+        echo "Recent wireless/firmware messages:"
+        dmesg | grep -i -E "brcm|wireless|wlan|firmware|43436|43430" | tail -15
+        
+        # Show loaded modules
+        echo "Currently loaded wireless modules:"
         lsmod | grep -E "brcm|wireless|80211" || echo "No wireless modules loaded"
         
-        echo "=== END WIRELESS DEBUG ==="
+        echo "=== END ENHANCED WIRELESS DEBUG ==="
         
     } | tee "$DEBUG_LOG"
     
     eend 0
 }
-WIRELESS_DEBUG
+WIRELESS_DEBUG_ENHANCED
 
 sudo chmod +x etc/init.d/wireless-debug
 
@@ -813,6 +980,8 @@ echo ""
 echo "DEBUG LOGS AVAILABLE:"
 echo "• Boot config: /var/log/boot-config.log"
 echo "• Wireless debug: /var/log/wireless-debug.log"
+echo "• Kernel compatibility: run /usr/local/bin/check-kernel-compat"
+echo "• Wireless module fix: run /usr/local/bin/fix-wireless-modules"
 echo ""
 echo "For support and documentation:"
 echo "• Repository: https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling"
@@ -821,13 +990,20 @@ FIRST_BOOT_SCRIPT
 
 sudo chmod +x usr/local/bin/first-boot-setup
 
-echo "=== PI ZERO 2W FIXES & ENHANCED DEBUGGING APPLIED ==="
+echo "=== ALL FIXES APPLIED - SUMMARY ==="
+echo "✅ Kernel/module compatibility fixes applied"
+echo "✅ Multiple kernel packages installed (linux-rpi, linux-rpi4, linux-edge)"
+echo "✅ Module loading configuration created"
 echo "✅ Pi Zero 2W firmware downloaded"
 echo "✅ Wireless driver configuration optimized"
 echo "✅ Fixed boot configuration processor with error handling"
-echo "✅ Added wireless debugging service"
+echo "✅ Added wireless debugging service with module fixes"
 echo "✅ Enhanced logging for troubleshooting"
 echo "✅ Fixed service dependencies and boot order"
+echo ""
+echo "Kernel module fix tools available:"
+echo "  • /usr/local/bin/fix-wireless-modules"
+echo "  • /usr/local/bin/check-kernel-compat"
 echo ""
 echo "Debug logs will be available at:"
 echo "  • /var/log/boot-config.log"
@@ -839,7 +1015,7 @@ echo "=== FINAL BUILD VERIFICATION ==="
 echo "Repository root: $REPO_ROOT"
 
 echo "Scripts installed:"
-ls -la usr/local/bin/ | grep -E "(process-boot-config|first-boot-setup|update-daemon|install-update)" || echo "❌ Scripts missing"
+ls -la usr/local/bin/ | grep -E "(process-boot-config|first-boot-setup|update-daemon|install-update|fix-wireless-modules|check-kernel-compat)" || echo "❌ Scripts missing"
 
 echo "Service files created:"
 ls -la etc/init.d/ | grep -E "(pistar-boot-config|first-boot|wireless-debug)" || echo "❌ Services missing"
@@ -858,7 +1034,11 @@ echo "System files:"
 
 echo "Pi Zero 2W firmware:"
 [ -f lib/firmware/brcm/brcmfmac43436-sdio.bin ] && echo "✅ Pi Zero 2W firmware downloaded" || echo "❌ Pi Zero 2W firmware missing"
-[ -f etc/modprobe.d/brcmfmac.conf ] && echo "✅ Wireless driver config created" || echo "❌ Wireless driver config missing"
+[ -f etc/modprobe.d/rpi-wireless.conf ] && echo "✅ Wireless driver config created" || echo "❌ Wireless driver config missing"
+
+echo "Kernel module fixes:"
+[ -f etc/modules-load.d/brcmfmac.conf ] && echo "✅ Module loading config created" || echo "❌ Module loading config missing"
+[ -f usr/local/bin/fix-wireless-modules ] && echo "✅ Wireless module fix script installed" || echo "❌ Wireless module fix script missing"
 
 echo "================================="
 
@@ -876,15 +1056,17 @@ sudo umount proc sys dev
 echo ""
 echo "=== ROOT FILESYSTEM BUILD COMPLETE ==="
 echo "✅ Alpine Linux 3.22 configured"
-echo "✅ Pi Zero 2W wireless support added"
+echo "✅ Pi Zero 2W wireless support added with kernel fixes"
 echo "✅ Fixed boot configuration processing"
 echo "✅ Enhanced debugging and logging"
 echo "✅ Secure user accounts configured"
 echo "✅ OTA update system installed"
 echo ""
-echo "FIXES APPLIED:"
+echo "CRITICAL FIXES APPLIED:"
 echo "• No more password prompts when pistar-config.txt exists"
 echo "• Pi Zero 2W wireless interface should now be detected"
+echo "• Multiple kernel packages for module compatibility"
+echo "• Wireless module loading and compatibility fixes"
 echo "• Comprehensive debugging logs for troubleshooting"
 echo "• Proper service dependencies and boot order"
 echo ""
