@@ -117,69 +117,111 @@ if wget -q --spider "$PI_FIRMWARE_BASE/kernel8.img" 2>/dev/null; then
     # Download essential firmware files
     echo "📥 Downloading firmware files..."
     
-    # Essential firmware files
-    FIRMWARE_FILES="bootcode.bin start.elf start4.elf fixup.dat fixup4.dat"
+    # Complete firmware set (not just essential)
+    FIRMWARE_FILES="bootcode.bin start.elf start4.elf start_x.elf start4x.elf start_cd.elf start4cd.elf start_db.elf start4db.elf fixup.dat fixup4.dat fixup_x.dat fixup4x.dat fixup_cd.dat fixup4cd.dat fixup_db.dat fixup4db.dat"
     
     for file in $FIRMWARE_FILES; do
         if wget -q -O "mnt/boot/$file" "$PI_FIRMWARE_BASE/$file"; then
             echo "✅ Downloaded: $file"
         else
-            echo "❌ Failed to download: $file"
+            echo "⚠️  Could not download: $file (may not exist)"
         fi
     done
     
-    # Download kernels
-    echo "📥 Downloading kernels..."
-    KERNEL_FILES="kernel.img kernel7.img kernel8.img"
+    # Download kernels and initramfs
+    echo "📥 Downloading kernels and initramfs..."
+    KERNEL_FILES="kernel.img kernel7.img kernel7l.img kernel8.img kernel_2712.img"
+    INITRAMFS_FILES="initramfs initramfs7 initramfs7l initramfs8 initramfs_2712"
     
     for kernel in $KERNEL_FILES; do
         if wget -q -O "mnt/boot/$kernel" "$PI_FIRMWARE_BASE/$kernel"; then
             echo "✅ Downloaded: $kernel"
         else
-            echo "⚠️  Could not download: $kernel"
+            echo "⚠️  Could not download: $kernel (may not exist)"
         fi
     done
     
-    # Download device trees
-    echo "📥 Downloading device trees..."
-    DTB_FILES="bcm2708-rpi-zero.dtb bcm2708-rpi-zero-w.dtb bcm2710-rpi-zero-2-w.dtb bcm2709-rpi-2-b.dtb bcm2710-rpi-3-b.dtb bcm2710-rpi-3-b-plus.dtb bcm2711-rpi-4-b.dtb"
-    
-    for dtb in $DTB_FILES; do
-        if wget -q -O "mnt/boot/$dtb" "$PI_FIRMWARE_BASE/$dtb"; then
-            echo "✅ Downloaded: $dtb"
+    for initramfs in $INITRAMFS_FILES; do
+        if wget -q -O "mnt/boot/$initramfs" "$PI_FIRMWARE_BASE/$initramfs"; then
+            echo "✅ Downloaded: $initramfs"
         else
-            echo "⚠️  Could not download: $dtb"
+            echo "⚠️  Could not download: $initramfs (may not exist)"
         fi
     done
     
-    # Download essential overlays
-    echo "📥 Downloading overlays..."
+    # Download ALL device trees (don't be selective)
+    echo "📥 Downloading ALL device tree files..."
+    
+    # Get list of all .dtb files from the repository
+    DTB_LIST=$(wget -q -O- "https://api.github.com/repos/raspberrypi/firmware/contents/boot" | grep -o '"name":"[^"]*\.dtb"' | cut -d'"' -f4 2>/dev/null || echo "")
+    
+    if [ -n "$DTB_LIST" ]; then
+        echo "📋 Found device tree files via API"
+        for dtb in $DTB_LIST; do
+            if wget -q -O "mnt/boot/$dtb" "$PI_FIRMWARE_BASE/$dtb"; then
+                echo "✅ Downloaded: $dtb"
+            else
+                echo "⚠️  Could not download: $dtb"
+            fi
+        done
+    else
+        echo "📋 Using comprehensive device tree list"
+        # Comprehensive list of known DTB files for all Pi models
+        DTB_FILES="bcm2708-rpi-b.dtb bcm2708-rpi-b-plus.dtb bcm2708-rpi-b-rev1.dtb bcm2708-rpi-cm.dtb bcm2708-rpi-zero.dtb bcm2708-rpi-zero-w.dtb bcm2709-rpi-2-b.dtb bcm2709-rpi-cm2.dtb bcm2710-rpi-2-b.dtb bcm2710-rpi-3-b.dtb bcm2710-rpi-3-b-plus.dtb bcm2710-rpi-cm3.dtb bcm2710-rpi-zero-2.dtb bcm2710-rpi-zero-2-w.dtb bcm2711-rpi-4-b.dtb bcm2711-rpi-400.dtb bcm2711-rpi-cm4.dtb bcm2711-rpi-cm4s.dtb bcm2712-rpi-5-b.dtb bcm2712-rpi-cm5.dtb"
+        
+        for dtb in $DTB_FILES; do
+            if wget -q -O "mnt/boot/$dtb" "$PI_FIRMWARE_BASE/$dtb"; then
+                echo "✅ Downloaded: $dtb"
+            else
+                echo "⚠️  Could not download: $dtb (may not exist yet)"
+            fi
+        done
+    fi
+    
+    # Download MORE comprehensive overlays
+    echo "📥 Downloading comprehensive overlays..."
     mkdir -p mnt/boot/overlays
     
-    OVERLAY_FILES="uart0.dtbo disable-bt.dtbo miniuart-bt.dtbo spi1-1cs.dtbo i2c1.dtbo gpio-no-irq.dtbo vc4-fkms-v3d.dtbo"
+    # More comprehensive overlay list for Pi-Star and general Pi functionality
+    OVERLAY_FILES="uart0.dtbo uart1.dtbo uart2.dtbo uart3.dtbo uart4.dtbo uart5.dtbo disable-bt.dtbo miniuart-bt.dtbo pi3-miniuart-bt.dtbo pi3-disable-bt.dtbo pi3-disable-wifi.dtbo spi0-cs.dtbo spi0-2cs.dtbo spi1-1cs.dtbo spi1-2cs.dtbo spi1-3cs.dtbo spi2-1cs.dtbo spi2-2cs.dtbo spi2-3cs.dtbo i2c0.dtbo i2c1.dtbo i2c3.dtbo i2c4.dtbo i2c5.dtbo i2c6.dtbo gpio-ir.dtbo gpio-ir-tx.dtbo gpio-key.dtbo gpio-led.dtbo gpio-poweroff.dtbo gpio-shutdown.dtbo w1-gpio.dtbo w1-gpio-pullup.dtbo vc4-fkms-v3d.dtbo vc4-kms-v3d.dtbo vc4-kms-v3d-pi4.dtbo dwc2.dtbo g_serial.dtbo libcomposite.dtbo midi-uart0.dtbo midi-uart1.dtbo pps-gpio.dtbo pwm.dtbo pwm-2chan.dtbo pwm-ir-tx.dtbo spi0-hw-cs.dtbo"
     
+    OVERLAY_SUCCESS=0
     for overlay in $OVERLAY_FILES; do
         if wget -q -O "mnt/boot/overlays/$overlay" "$PI_FIRMWARE_BASE/overlays/$overlay"; then
             echo "✅ Downloaded overlay: $overlay"
+            OVERLAY_SUCCESS=1
         else
             echo "⚠️  Could not download overlay: $overlay"
         fi
     done
+    
+    if [ "$OVERLAY_SUCCESS" -eq 0 ]; then
+        echo "⚠️  No overlays downloaded - removing empty directory"
+        rmdir mnt/boot/overlays 2>/dev/null || true
+    fi
     
     MAIN_KERNEL="RaspberryPi OS kernels"
     
 else
     echo "⚠️  Cannot access firmware repository - creating stub files for CI"
     
-    # Create stub files for CI testing
+    # Create more comprehensive stub files for CI testing
     echo "# Firmware stub" > mnt/boot/bootcode.bin
     echo "# Firmware stub" > mnt/boot/start.elf
     echo "# Firmware stub" > mnt/boot/start4.elf
+    echo "# Firmware stub" > mnt/boot/start_x.elf
+    echo "# Firmware stub" > mnt/boot/start4x.elf
     echo "# Firmware stub" > mnt/boot/fixup.dat
     echo "# Firmware stub" > mnt/boot/fixup4.dat
+    echo "# Firmware stub" > mnt/boot/fixup_x.dat
+    echo "# Firmware stub" > mnt/boot/fixup4x.dat
     echo "# Kernel stub" > mnt/boot/kernel.img
     echo "# Kernel stub" > mnt/boot/kernel7.img
+    echo "# Kernel stub" > mnt/boot/kernel7l.img
     echo "# Kernel stub" > mnt/boot/kernel8.img
+    echo "# Kernel stub" > mnt/boot/kernel_2712.img
+    echo "# Initramfs stub" > mnt/boot/initramfs
+    echo "# Initramfs stub" > mnt/boot/initramfs8
     
     MAIN_KERNEL="Stub files (CI testing only)"
 fi
@@ -334,27 +376,33 @@ dtoverlay=vc4-fkms-v3d
 disable_overscan=1
 gpu_mem=64
 
-# Model-specific kernels
+# Model-specific kernels and initramfs
 [pi1]
 kernel=kernel.img
+initramfs initramfs followkernel
 
 [pi2]
 kernel=kernel7.img
+initramfs initramfs7 followkernel
 
 [pi3]
 kernel=kernel8.img
+initramfs initramfs8 followkernel
 
 [pi02]
 # Pi Zero 2W WiFi stability
 kernel=kernel8.img
+initramfs initramfs8 followkernel
 arm_freq=900
 gpu_freq=100
 
 [pi4]
-kernel=kernel8.img
+kernel=kernel7l.img
+initramfs initramfs7l followkernel
 
 [pi5]
-kernel=kernel8.img
+kernel=kernel_2712.img
+initramfs initramfs_2712 followkernel
 
 [all]
 # UART for Pi-Star
