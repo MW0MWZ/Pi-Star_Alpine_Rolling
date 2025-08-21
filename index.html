@@ -178,102 +178,136 @@
         </ul>
     </div>
     
-    <script>
-        const baseUrl = window.location.origin + window.location.pathname.replace('/index.html', '').replace(/\/$/, '');
-        document.getElementById('update-url').textContent = baseUrl + '/latest.json';
+    <script data-cfasync="false">
+        // Use completely unique variable names to avoid any conflicts
+        const API_BASE_URL = 'https://version.pistar.uk';
+        const RELEASES_URL = 'https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling/releases';
         
+        // Set the update URL immediately
+        document.getElementById('update-url').textContent = API_BASE_URL + '/latest.json';
+        
+        // Debug logging
+        console.log('Fetching version data from:', API_BASE_URL + '/latest.json');
+        
+        // Fetch latest version data
         fetch('./latest.json')
-            .then(response => response.json())
-            .then(data => {
-                // Update status indicator
+            .then(function(response) {
+                console.log('Response status:', response.status);
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status + ': ' + response.statusText);
+                }
+                return response.json();
+            })
+            .then(function(versionData) {
+                console.log('Received version data:', versionData);
+                
+                // Update status to online
                 document.getElementById('status-indicator').className = 'status-indicator status-online';
                 document.getElementById('status-text').textContent = 'Update Server Online';
                 
-                // Update version info
-                document.getElementById('version-info').innerHTML = `
-                    <div style="text-align: center; margin-bottom: 15px;">
-                        <div class="status-indicator status-online"></div>
-                        <span><strong>Update Server Online</strong></span>
-                    </div>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
-                        <div><strong>Latest Version:</strong><br>${data.latest_version}</div>
-                        <div><strong>Release Date:</strong><br>${new Date(data.release_date).toLocaleDateString()}</div>
-                        <div><strong>Architecture:</strong><br>${data.architecture || 'armhf'}</div>
-                        <div><strong>Alpine Version:</strong><br>${data.alpine_version || 'N/A'}</div>
-                    </div>
-                    <div style="margin-top: 15px;">
-                        <strong>Package Checksum:</strong><br>
-                        <code style="word-break: break-all; font-size: 0.9em;">${data.checksum}</code>
-                    </div>
-                `;
+                // Update version information display
+                document.getElementById('version-info').innerHTML = 
+                    '<div style="text-align: center; margin-bottom: 15px;">' +
+                        '<div class="status-indicator status-online"></div>' +
+                        '<span><strong>Update Server Online</strong></span>' +
+                    '</div>' +
+                    '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">' +
+                        '<div><strong>Latest Version:</strong><br>' + versionData.latest_version + '</div>' +
+                        '<div><strong>Release Date:</strong><br>' + new Date(versionData.release_date).toLocaleDateString() + '</div>' +
+                        '<div><strong>Architecture:</strong><br>' + (versionData.architecture || 'armhf') + '</div>' +
+                        '<div><strong>Alpine Version:</strong><br>' + (versionData.alpine_version || 'N/A') + '</div>' +
+                    '</div>' +
+                    '<div style="margin-top: 15px;">' +
+                        '<strong>Package Checksum:</strong><br>' +
+                        '<code style="word-break: break-all; font-size: 0.9em;">' + versionData.checksum + '</code>' +
+                    '</div>';
                 
                 // Create download section
-                const githubBaseUrl = 'https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling/releases';
-                const downloadInfo = `
-                    <p><strong>Latest Release:</strong> v${data.latest_version} 
-                       <span style="color: #666;">(${new Date(data.release_date).toLocaleDateString()})</span>
-                    </p>
-                    <div class="download-links">
-                        <a href="${data.download_url}" class="download-btn">
-                            📦 Download Update Package
-                        </a>
-                        <a href="${githubBaseUrl}/download/v${data.latest_version}/pi-star-${data.latest_version}.img.gz" class="download-btn secondary">
-                            💾 Download Full SD Card Image
-                        </a>
-                        <a href="${data.signature_url}" class="download-btn" style="background: #ff9800;">
-                            🔒 Download Signature
-                        </a>
-                        <a href="${githubBaseUrl}/tag/v${data.latest_version}" class="download-btn" style="background: #9c27b0;">
-                            📋 View Release Notes
-                        </a>
-                    </div>
-                    <p style="margin-top: 15px; font-size: 0.9em; color: #666;">
-                        <strong>Update Package:</strong> For existing Pi-Star installations (OTA updates)<br>
-                        <strong>SD Card Image:</strong> For new installations or complete system restore
-                    </p>
-                `;
+                var downloadHTML = 
+                    '<p><strong>Latest Release:</strong> v' + versionData.latest_version + ' ' +
+                       '<span style="color: #666;">(' + new Date(versionData.release_date).toLocaleDateString() + ')</span>' +
+                    '</p>' +
+                    '<div class="download-links">' +
+                        '<a href="' + versionData.download_url + '" class="download-btn">' +
+                            '📦 Download Update Package' +
+                        '</a>' +
+                        '<a href="' + RELEASES_URL + '/download/v' + versionData.latest_version + '/pi-star-' + versionData.latest_version + '.img.gz" class="download-btn secondary">' +
+                            '💾 Download Full SD Card Image' +
+                        '</a>' +
+                        '<a href="' + versionData.signature_url + '" class="download-btn" style="background: #ff9800;">' +
+                            '🔒 Download Signature' +
+                        '</a>' +
+                        '<a href="' + RELEASES_URL + '/tag/v' + versionData.latest_version + '" class="download-btn" style="background: #9c27b0;">' +
+                            '📋 View Release Notes' +
+                        '</a>' +
+                    '</div>' +
+                    '<p style="margin-top: 15px; font-size: 0.9em; color: #666;">' +
+                        '<strong>Update Package:</strong> For existing Pi-Star installations (OTA updates)<br>' +
+                        '<strong>SD Card Image:</strong> For new installations or complete system restore' +
+                    '</p>';
                 
-                document.getElementById('download-info').innerHTML = downloadInfo;
+                document.getElementById('download-info').innerHTML = downloadHTML;
                 
-                // Update command examples with real URLs
-                const githubBaseUrl = 'https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling/releases';
-                const imageUrl = `${githubBaseUrl}/download/v${data.latest_version}/pi-star-${data.latest_version}.img.gz`;
+                // Update command examples
+                var imageDownloadURL = RELEASES_URL + '/download/v' + versionData.latest_version + '/pi-star-' + versionData.latest_version + '.img.gz';
                 
-                // Update command blocks
-                document.getElementById('update-check-command').textContent = `curl ${baseUrl}/latest.json`;
+                document.getElementById('update-check-command').textContent = 'curl ' + API_BASE_URL + '/latest.json';
                 
-                document.getElementById('flash-commands').textContent = `# Download and flash (replace X with your SD card device)
-wget ${imageUrl}
-gunzip -c pi-star-${data.latest_version}.img.gz | sudo dd of=/dev/sdX bs=4M status=progress`;
+                document.getElementById('flash-commands').textContent = 
+                    '# Download and flash (replace X with your SD card device)\n' +
+                    'wget ' + imageDownloadURL + '\n' +
+                    'gunzip -c pi-star-' + versionData.latest_version + '.img.gz | sudo dd of=/dev/sdX bs=4M status=progress';
                 
-                document.getElementById('verify-commands').textContent = `# Download update and signature
-wget ${data.download_url}
-wget ${data.signature_url}
-
-# Verify signature (you'll need the public key from the repository)
-openssl dgst -sha256 -verify public-key.pem \\
-  -signature pi-star-${data.latest_version}.tar.gz.sig \\
-  pi-star-${data.latest_version}.tar.gz`;
+                document.getElementById('verify-commands').textContent = 
+                    '# Download update and signature\n' +
+                    'wget ' + versionData.download_url + '\n' +
+                    'wget ' + versionData.signature_url + '\n\n' +
+                    '# Verify signature (you\'ll need the public key from the repository)\n' +
+                    'openssl dgst -sha256 -verify public-key.pem \\\n' +
+                    '  -signature pi-star-' + versionData.latest_version + '.tar.gz.sig \\\n' +
+                    '  pi-star-' + versionData.latest_version + '.tar.gz';
             })
-            .catch(error => {
-                // Update status for offline
+            .catch(function(error) {
+                console.error('Failed to load version data:', error);
+                
+                // Update status to offline
                 document.getElementById('status-indicator').className = 'status-indicator status-offline';
                 document.getElementById('status-text').textContent = 'Update Server Offline';
                 
-                document.getElementById('version-info').innerHTML = `
-                    <div style="text-align: center;">
-                        <div class="status-indicator status-offline"></div>
-                        <span style="color: #f44336;"><strong>Update Server Offline</strong></span>
-                    </div>
-                    <p style="color: #666; text-align: center; margin-top: 15px;">
-                        Unable to load version information. This may be normal if no releases have been published yet.
-                    </p>
-                `;
+                // Show error state
+                document.getElementById('version-info').innerHTML = 
+                    '<div style="text-align: center;">' +
+                        '<div class="status-indicator status-offline"></div>' +
+                        '<span style="color: #f44336;"><strong>Update Server Offline</strong></span>' +
+                    '</div>' +
+                    '<p style="color: #666; text-align: center; margin-top: 15px;">' +
+                        'Unable to load version information: ' + error.message +
+                    '</p>' +
+                    '<p style="color: #666; text-align: center; font-size: 0.9em;">' +
+                        'This may be normal if no releases have been published yet.' +
+                    '</p>';
                 
-                document.getElementById('download-info').innerHTML = `
-                    <p style="color: #f44336;">❌ Unable to load download information</p>
-                    <p>Check the <a href="https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling/releases" target="_blank">GitHub Releases page</a> for manual downloads.</p>
-                `;
+                document.getElementById('download-info').innerHTML = 
+                    '<p style="color: #f44336;">❌ Unable to load download information</p>' +
+                    '<p><strong>Reason:</strong> ' + error.message + '</p>' +
+                    '<p>Check the <a href="https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling/releases" target="_blank">GitHub Releases page</a> for manual downloads.</p>';
+                
+                // Set fallback commands
+                document.getElementById('update-check-command').textContent = 'curl ' + API_BASE_URL + '/latest.json';
+                document.getElementById('flash-commands').textContent = 
+                    '# Download latest release from GitHub\n' +
+                    '# Visit: https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling/releases\n' +
+                    'wget [DOWNLOAD_URL]\n' +
+                    'gunzip -c pi-star-*.img.gz | sudo dd of=/dev/sdX bs=4M status=progress';
+                document.getElementById('verify-commands').textContent = 
+                    '# Download from GitHub releases page\n' +
+                    '# Visit: https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling/releases\n' +
+                    'wget [UPDATE_URL]\n' +
+                    'wget [SIGNATURE_URL]\n\n' +
+                    '# Verify signature\n' +
+                    'openssl dgst -sha256 -verify public-key.pem \\\n' +
+                    '  -signature pi-star-*.tar.gz.sig \\\n' +
+                    '  pi-star-*.tar.gz';
             });
     </script>
 </body>
