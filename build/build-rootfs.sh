@@ -116,7 +116,6 @@ apk add --no-cache \
     wget
 
 echo "✅ Streamlined Alpine packages installed"
-CHROOT_PACKAGES
 
 echo "Installing PURE ALPINE Raspberry Pi kernel..."
 # Install Alpine's Pi kernel inside chroot
