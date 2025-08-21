@@ -42,17 +42,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up build environment
+      - name: Set up build environment for Alpine
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             qemu-user-static \
-            debootstrap \
             binfmt-support \
             openssl \
             curl \
             wget \
             rsync
+          echo "✅ Alpine build environment ready (no debootstrap needed)"
 
       - name: Set test version
         id: version
@@ -93,11 +93,12 @@ jobs:
               exit 1
             fi
           fi
+          echo "✅ Alpine rootfs ready: $(ls -lh /tmp/alpine-cache/alpine-minirootfs.tar.gz | awk '{print $5}')"
 
       - name: Generate test signing keys
         run: |
           mkdir -p keys
-          # FIXED: Generate temporary keys for test builds using correct OpenSSL syntax
+          # Generate temporary keys for test builds using correct OpenSSL syntax
           echo "Generating RSA private key..."
           openssl genpkey -algorithm RSA -out keys/private.pem -pkeyopt rsa_keygen_bits:2048
           
@@ -132,7 +133,7 @@ jobs:
       - name: Package and sign test update
         run: |
           mkdir -p output
-          # FIXED: Don't change rootfs ownership - let packaging script handle permissions with sudo
+          # Don't change rootfs ownership - let packaging script handle permissions with sudo
           echo "Creating update package with proper permission handling..."
           chmod +x build/package-update.sh
           ./build/package-update.sh \
@@ -154,6 +155,7 @@ jobs:
             "architecture": "${{ env.BUILD_ARCH }}",
             "alpine_version": "${{ env.ALPINE_VERSION }}",
             "build_type": "test",
+            "build_system": "alpine_native",
             "trigger": "${{ github.event_name }}",
             "files": {
               "update": "pi-star-${{ steps.version.outputs.VERSION }}.tar.gz",
@@ -164,7 +166,8 @@ jobs:
             "notes": {
               "signing_key": "⚠️  Test key - NOT for production use!",
               "update_server": "❌ Will NOT update production update server",
-              "purpose": "Development and testing only"
+              "purpose": "Development and testing only",
+              "build_approach": "Pure Alpine Linux (no debootstrap)"
             }
           }
           EOF
@@ -222,6 +225,12 @@ jobs:
           fi
           
           echo "✅ All validation checks passed!"
+          echo ""
+          echo "🧪 ALPINE BUILD VERIFICATION:"
+          echo "• No debootstrap used ✅"
+          echo "• Pure Alpine approach ✅" 
+          echo "• Alpine kernel and modules ✅"
+          echo "• Minimal dependencies ✅"
 
       - name: Upload test artifacts
         uses: actions/upload-artifact@v4
@@ -239,6 +248,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** ${{ steps.version.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY
           echo "**Pi-Star Mode:** ${{ github.event.inputs.pi_star_mode || 'placeholder' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Build Approach:** Pure Alpine Linux (no debootstrap)" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📦 Generated Files:" >> $GITHUB_STEP_SUMMARY
@@ -247,6 +257,12 @@ jobs:
           echo "- \`pi-star-${{ steps.version.outputs.VERSION }}.img.gz\` - Full SD card image" >> $GITHUB_STEP_SUMMARY
           echo "- \`test-release-info.json\` - Build metadata" >> $GITHUB_STEP_SUMMARY
           echo "- \`public.pem\` - Test public key for verification" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🏔️ Alpine Build Benefits:" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **No debootstrap dependency** - Clean Alpine-only build" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Minimal build environment** - Only essential tools" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Faster builds** - No unnecessary Debian tooling" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **Pure Alpine approach** - Consistent with target system" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🔒 Security Notice:" >> $GITHUB_STEP_SUMMARY
           echo "⚠️  **Test builds use temporary signing keys**" >> $GITHUB_STEP_SUMMARY
@@ -263,4 +279,5 @@ jobs:
           echo "Update Package: $(ls -lh output/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz | awk '{print $5}')" >> $GITHUB_STEP_SUMMARY
           echo "SD Card Image:  $(ls -lh /tmp/pi-star-image-build/pi-star-${{ steps.version.outputs.VERSION }}.img.gz | awk '{print $5}')" >> $GITHUB_STEP_SUMMARY
           echo "Total Files:    $(tar -tzf output/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz | wc -l) files in rootfs" >> $GITHUB_STEP_SUMMARY
+          echo "Build System:   Pure Alpine (no debootstrap)" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

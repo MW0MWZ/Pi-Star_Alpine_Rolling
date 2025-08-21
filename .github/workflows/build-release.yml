@@ -42,13 +42,12 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
             qemu-user-static \
-            debootstrap \
             binfmt-support \
             openssl \
             curl \
             wget \
             rsync > /dev/null 2>&1
-          echo "✅ Build environment ready"
+          echo "✅ Build environment ready (Alpine-optimized)"
 
       - name: Set version
         id: version
