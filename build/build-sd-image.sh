@@ -289,29 +289,39 @@ else
 fi
 echo "Alpine kernel version: $KERNEL_VERSION"
 
-# Install MINIMAL Pi firmware (just enough to boot Alpine kernel)
-echo "Installing minimal Pi firmware for Alpine kernel boot..."
+# Install Pi firmware from Alpine's kernel package (Alpine provides everything!)
+echo "Installing Pi firmware from Alpine kernel package..."
 
-# Create temporary firmware download
-mkdir -p firmware-temp
-cd firmware-temp
+# Alpine's linux-rpi package provides ALL the Pi firmware we need!
+echo "Copying Alpine's Pi firmware and device tree files..."
 
-# Download ONLY essential Pi firmware files (not kernel!)
-echo "Downloading minimal Pi firmware..."
-wget -q https://github.com/raspberrypi/firmware/raw/master/boot/bootcode.bin || echo "bootcode.bin download failed (may not be needed on Pi 4+)"
-wget -q https://github.com/raspberrypi/firmware/raw/master/boot/start.elf || echo "start.elf download failed"
-wget -q https://github.com/raspberrypi/firmware/raw/master/boot/start4.elf || echo "start4.elf download failed"
-wget -q https://github.com/raspberrypi/firmware/raw/master/boot/fixup.dat || echo "fixup.dat download failed"
-wget -q https://github.com/raspberrypi/firmware/raw/master/boot/fixup4.dat || echo "fixup4.dat download failed"
+# Copy ALL device tree files from Alpine
+if ls "$ROOTFS_PATH/boot"/*.dtb >/dev/null 2>&1; then
+    cp "$ROOTFS_PATH/boot"/*.dtb mnt/boot/
+    echo "✅ Copied $(ls "$ROOTFS_PATH/boot"/*.dtb | wc -l) device tree files from Alpine"
+else
+    echo "❌ No device tree files found in Alpine rootfs"
+fi
 
-# Copy only essential firmware (NO Pi kernels!)
-echo "Installing firmware files..."
-cp bootcode.bin ../mnt/boot/ 2>/dev/null || echo "bootcode.bin not available (normal for Pi 4+)"
-cp start*.elf ../mnt/boot/ 2>/dev/null || echo "start.elf files not available"
-cp fixup*.dat ../mnt/boot/ 2>/dev/null || echo "fixup.dat files not available"
+# Copy overlays directory from Alpine  
+if [ -d "$ROOTFS_PATH/boot/overlays" ]; then
+    cp -r "$ROOTFS_PATH/boot/overlays" mnt/boot/
+    echo "✅ Copied overlays directory from Alpine ($(ls "$ROOTFS_PATH/boot/overlays" | wc -l) files)"
+else
+    echo "❌ No overlays directory found in Alpine rootfs"
+fi
 
-cd ..
-rm -rf firmware-temp
+# Copy Pi firmware files from Alpine
+for firmware_file in bootcode.bin start.elf start4.elf fixup.dat fixup4.dat; do
+    if [ -f "$ROOTFS_PATH/boot/$firmware_file" ]; then
+        cp "$ROOTFS_PATH/boot/$firmware_file" mnt/boot/
+        echo "✅ Copied $firmware_file from Alpine"
+    else
+        echo "⚠️  $firmware_file not found in Alpine, may not be needed"
+    fi
+done
+
+echo "✅ All Pi firmware copied from Alpine kernel package (no downloads needed!)"
 
 # Install Alpine kernel using STANDARD Pi paths (not Alpine's layered filesystem)
 echo "Installing Alpine kernel using standard Pi boot paths..."
