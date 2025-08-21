@@ -321,25 +321,44 @@ cp "$ALPINE_KERNEL" mnt/boot/kernel7l.img # For Pi 4
 cp "$ALPINE_KERNEL" mnt/boot/kernel8.img  # For Pi 3/4 64-bit mode
 
 if [ -n "$ALPINE_INITRD" ] && [ -f "$ALPINE_INITRD" ]; then
-    echo "Installing Alpine initrd..."
+    echo "Installing Alpine initrd with multiple naming conventions..."
+    
+    # Get the kernel version from the initrd filename or use a default
+    if echo "$ALPINE_INITRD" | grep -q "6\.12\."; then
+        KERNEL_VER="6.12.38-0-rpi"
+    else
+        # Extract kernel version from filename
+        KERNEL_VER=$(basename "$ALPINE_INITRD" | sed 's/initramfs-//')
+    fi
+    
+    # Install initrd with multiple names for compatibility
     cp "$ALPINE_INITRD" mnt/boot/initrd.img
     cp "$ALPINE_INITRD" mnt/boot/initrd7.img
     cp "$ALPINE_INITRD" mnt/boot/initrd7l.img
     cp "$ALPINE_INITRD" mnt/boot/initrd8.img
-    INITRD_CMDLINE="initrd=initrd.img"
+    
+    # Also use the original Alpine naming
+    cp "$ALPINE_INITRD" "mnt/boot/initramfs-rpi"
+    cp "$ALPINE_INITRD" "mnt/boot/initramfs-${KERNEL_VER}"
+    
+    echo "✅ Initrd installed with multiple naming conventions"
+    INITRD_CMDLINE="initramfs initrd.img followkernel"
 else
-    echo "No initrd found - booting without initrd"
+    echo "⚠️  No initrd found - booting without initramfs"
     INITRD_CMDLINE=""
 fi
 
-# Create PURE ALPINE config.txt
-echo "Creating Pure Alpine config.txt..."
+# Create PURE ALPINE config.txt with enhanced boot debugging
+echo "Creating Pure Alpine config.txt with boot diagnostics..."
 cat > mnt/boot/config.txt << 'EOF'
-# Pi-Star Pure Alpine Configuration
+# Pi-Star Pure Alpine Configuration - BOOT DIAGNOSTIC VERSION
 # Uses 100% Alpine kernel (no Pi Foundation kernel mixing)
 
-# Essential Pi firmware settings
+# BOOT DEBUGGING - Enable verbose output
 enable_uart=1
+uart_2ndstage=1
+
+# GPU memory (minimal for headless)
 gpu_mem=16
 
 # Audio support
@@ -349,43 +368,53 @@ dtparam=audio=on
 dtparam=spi=on
 dtparam=i2c_arm=on
 
-# Universal kernel configuration for all Pi models
-# Alpine kernel works on all Pi models
-kernel=kernel.img
+# BOOT DIAGNOSTICS - Show detailed boot process
+boot_delay=2
+disable_splash=0
 
-# Pi model specific optimizations
+# KERNEL SELECTION - Let Pi firmware choose appropriate kernel
+# Don't force specific kernel names initially
+# kernel=kernel.img
+
+# COMPATIBILITY - Support all Pi models with fallbacks
 [pi02]
-# Pi Zero 2W - use universal Alpine kernel
+# Pi Zero 2W - try multiple kernel options
 kernel=kernel7.img
 
 [pi3]
-# Pi 3 - use universal Alpine kernel
+# Pi 3A+/3B+ - try multiple kernel options  
 kernel=kernel7.img
 
 [pi4]
-# Pi 4 - use universal Alpine kernel
+# Pi 4
 kernel=kernel7l.img
 
 [pi5]
-# Pi 5 - use universal Alpine kernel
+# Pi 5
 kernel=kernel7l.img
 
 [all]
-# Wireless optimizations for all models
+# DEBUGGING - Verbose boot output
+initramfs initrd.img followkernel
+
+# Wireless optimization
 dtparam=krnbt=off
 
-# Boot optimizations
-disable_splash=1
-boot_delay=0
-
-# Memory optimization for embedded use
+# MEMORY/PERFORMANCE
 gpu_mem=16
+arm_freq=900
+core_freq=250
+sdram_freq=400
+
+# BOOT PROCESS DEBUGGING
+bootcode_delay=1
+boot_delay=1
 EOF
 
-# Create Alpine-optimized cmdline.txt
-echo "Creating Alpine-optimized cmdline.txt..."
+# Create Alpine-optimized cmdline.txt with boot debugging
+echo "Creating Alpine-optimized cmdline.txt with diagnostics..."
 cat > mnt/boot/cmdline.txt << EOF
-console=serial0,115200 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 elevator=deadline fsck.repair=yes rootwait quiet modules-load=brcmfmac,brcmutil,cfg80211 ${INITRD_CMDLINE}
+console=serial0,115200 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 rootwait rw init=/sbin/init debug loglevel=7 ${INITRD_CMDLINE}
 EOF
 
 # Create A/B state file (start with slot A)
@@ -412,7 +441,136 @@ cp -a mnt/root-a/* mnt/root-b/
 echo "Setting up minimal data partition..."
 mkdir -p mnt/data/{config,logs,database}
 
-# Create sample configuration file on boot partition
+# Create comprehensive boot troubleshooting guide
+cat > mnt/boot/BOOT_TROUBLESHOOTING.txt << 'EOF'
+# Pi-Star Alpine Boot Troubleshooting Guide
+
+## COMMON BOOT LOOP CAUSES & FIXES
+
+### 1. KERNEL ISSUES
+**Symptoms:** Boot loop, no display output, red LED pattern
+**Fixes:**
+- Edit config.txt on boot partition
+- Try different kernel= lines:
+  kernel=kernel.img       # Generic
+  kernel=kernel7.img      # Pi 2/3/Zero 2W  
+  kernel=kernel7l.img     # Pi 4/5
+  # Comment out kernel= line to let Pi firmware auto-detect
+
+### 2. INITRAMFS ISSUES  
+**Symptoms:** Kernel loads but can't find root filesystem
+**Fixes:**
+- Edit config.txt, try:
+  # Comment out: initramfs initrd.img followkernel
+  # Or change to: initramfs initrd7.img followkernel
+
+### 3. ROOT FILESYSTEM ISSUES
+**Symptoms:** "Kernel panic - not syncing: VFS: Unable to mount root fs"
+**Fixes:**
+- Edit cmdline.txt, try:
+  root=/dev/mmcblk0p2     # Standard
+  root=LABEL=PISTAR_ROOT_A # By label
+  rootdelay=5             # Add delay
+
+### 4. POWER/HARDWARE ISSUES
+**Symptoms:** Random reboots, undervoltage warnings
+**Fixes:**
+- Use quality SD card (Class 10, A1/A2)
+- Use proper 5V/2.5A+ power supply
+- Check SD card connections
+
+### 5. ALPINE-SPECIFIC BOOT PROCESS
+
+Alpine Linux uses OpenRC instead of systemd:
+- Services in /etc/init.d/
+- Runlevels: sysinit -> boot -> default
+- Check logs in /var/log/
+
+## SERIAL CONSOLE DEBUG (Recommended)
+
+Connect USB-TTL adapter to Pi GPIO:
+- GND -> Pin 6 (GND)
+- RX  -> Pin 8 (GPIO 14 / TXD)  
+- TX  -> Pin 10 (GPIO 15 / RXD)
+
+Serial settings: 115200 8N1
+
+Use: minicom, screen, or PuTTY
+Command: screen /dev/ttyUSB0 115200
+
+## EMERGENCY BOOT OPTIONS
+
+### Option 1: Minimal Boot Test
+Edit cmdline.txt:
+console=serial0,115200 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 rootwait rw init=/bin/sh
+
+This boots to emergency shell - no services
+
+### Option 2: Single User Mode  
+Edit cmdline.txt, add: single
+Boots to single-user mode for repairs
+
+### Option 3: Kernel Parameter Debug
+Edit cmdline.txt, add: debug loglevel=8
+Maximum kernel debug output
+
+## COMMON Pi MODEL ISSUES
+
+### Pi Zero 2W:
+- Use kernel7.img (ARMv7)
+- Needs initramfs support
+- May need rootdelay=10
+
+### Pi 3A+:
+- Use kernel7.img (ARMv7)  
+- Check power supply (3A minimum)
+- SD card speed matters
+
+### Pi 4/5:
+- Use kernel7l.img (ARMv7l)
+- May need firmware updates
+- Check USB-C power delivery
+
+## ALPINE LINUX DIFFERENCES
+
+Unlike Raspbian/Pi OS:
+- No raspi-config
+- Uses musl libc (not glibc)
+- Different package manager (apk)
+- OpenRC init system
+- Minimal base system
+
+## RECOVERY PROCEDURE
+
+1. Connect serial console (best option)
+2. Try emergency boot options above
+3. Check /var/log/messages after boot
+4. Verify filesystem integrity:
+   fsck /dev/mmcblk0p2
+5. Check Alpine services:
+   rc-status
+   rc-service --list
+
+## IF ALL ELSE FAILS
+
+1. Reflash SD card
+2. Try different SD card  
+3. Test on different Pi model
+4. Check Pi hardware (known good setup)
+
+## GETTING HELP
+
+Include this info when reporting issues:
+- Pi model and revision
+- SD card type/speed
+- Power supply specs  
+- Serial console output
+- LED patterns observed
+- Steps tried from this guide
+
+Repository: https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling
+Issues: https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling/issues
+EOF
 cat > mnt/boot/pistar-config.txt.sample << 'EOF'
 # Pi-Star Boot Configuration Example
 # Rename this file to 'pistar-config.txt' and edit as needed
