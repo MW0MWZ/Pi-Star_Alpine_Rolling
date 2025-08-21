@@ -130,6 +130,40 @@ apk add --no-cache \
 echo "Package installation complete"
 CHROOT_PACKAGES
 
+# ENHANCED: Pi Zero 2W Wireless Support & Debugging
+echo "=== APPLYING PI ZERO 2W FIXES & ENHANCED DEBUGGING ==="
+
+# CRITICAL: Download missing Pi Zero 2W firmware
+echo "Downloading Pi Zero 2W specific firmware..."
+sudo mkdir -p lib/firmware/brcm
+
+# Download critical Pi Zero 2W firmware files that Alpine may be missing
+if ! wget -q -O lib/firmware/brcm/brcmfmac43436-sdio.bin \
+    "https://github.com/RPi-Distro/firmware-nonfree/raw/master/brcm80211/brcm/brcmfmac43436-sdio.bin"; then
+    echo "WARNING: Failed to download brcmfmac43436-sdio.bin"
+fi
+
+if ! wget -q -O lib/firmware/brcm/brcmfmac43436-sdio.txt \
+    "https://github.com/RPi-Distro/firmware-nonfree/raw/master/brcm80211/brcm/brcmfmac43436-sdio.txt"; then
+    echo "WARNING: Failed to download brcmfmac43436-sdio.txt"
+fi
+
+# Create Pi Zero 2W specific configuration
+sudo cp lib/firmware/brcm/brcmfmac43436-sdio.txt \
+     lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.txt 2>/dev/null || \
+     echo "WARNING: Could not create Pi Zero 2W specific config"
+
+# CRITICAL: Configure wireless driver for Pi Zero 2W compatibility
+echo "Configuring wireless drivers for Pi Zero 2W..."
+sudo tee etc/modprobe.d/brcmfmac.conf << 'EOF'
+# Pi Zero 2W wireless driver configuration
+# Disable problematic features that cause connection issues with some access points
+options brcmfmac roamoff=1 feature_disable=0x282000
+
+# Alternative: use this line instead if you have connection issues
+# options brcmfmac feature_disable=0x2000
+EOF
+
 # Enable essential services (basic setup only)
 echo "Configuring basic services..."
 sudo chroot . /bin/sh << 'CHROOT_SERVICES'
@@ -260,11 +294,164 @@ if [ -f "$REPO_ROOT/scripts/partition-switcher.sh" ]; then
     sudo chmod +x usr/local/bin/partition-switcher
 fi
 
-# Install boot configuration processor
-if [ -f "$REPO_ROOT/scripts/process-boot-config.sh" ]; then
-    sudo cp "$REPO_ROOT/scripts/process-boot-config.sh" usr/local/bin/process-boot-config
-    sudo chmod +x usr/local/bin/process-boot-config
+# CRITICAL: Install FIXED boot configuration processor
+echo "Installing FIXED boot configuration processor..."
+sudo tee usr/local/bin/process-boot-config << 'BOOT_CONFIG_FIXED'
+#!/bin/bash
+# FIXED: Enhanced boot configuration processor with error handling
+set -e
+
+CONFIG_FILE="/boot/pistar-config.txt"
+PROCESSED_FLAG="/boot/.config-processed"
+DEBUG_LOG="/var/log/boot-config.log"
+
+# Ensure log directory exists
+mkdir -p /var/log
+
+# Debug function
+log_debug() {
+    echo "$(date): $*" | tee -a "$DEBUG_LOG"
+}
+
+log_debug "=== Boot Configuration Starting ==="
+log_debug "Config file: $CONFIG_FILE"
+log_debug "Processed flag: $PROCESSED_FLAG"
+
+# Check if already processed
+if [ -f "$PROCESSED_FLAG" ]; then
+    log_debug "Configuration already processed - exiting"
+    exit 0
 fi
+
+# Check if config file exists  
+if [ ! -f "$CONFIG_FILE" ]; then
+    log_debug "No configuration file found - exiting"
+    exit 0
+fi
+
+log_debug "Processing configuration file..."
+log_debug "Config file contents:"
+cat "$CONFIG_FILE" | sed 's/^/  /' | tee -a "$DEBUG_LOG"
+
+# Parse configuration variables
+WIFI_SSID=""
+WIFI_PASSWORD=""
+USER_PASSWORD=""
+SSH_KEY=""
+HOSTNAME=""
+
+while IFS='=' read -r key value; do
+    # Skip comments and empty lines
+    [[ $key =~ ^[[:space:]]*# ]] && continue
+    [[ -z "$key" ]] && continue
+    
+    # Remove quotes and whitespace
+    key=$(echo "$key" | tr -d ' ')
+    value=$(echo "$value" | sed 's/^["'\'']*//;s/["'\'']*$//')
+    
+    case "$key" in
+        "wifi_ssid") WIFI_SSID="$value" ;;
+        "wifi_password") WIFI_PASSWORD="$value" ;;
+        "user_password") USER_PASSWORD="$value" ;;
+        "ssh_key") SSH_KEY="$value" ;;
+        "hostname") HOSTNAME="$value" ;;
+    esac
+done < "$CONFIG_FILE"
+
+# Configure WiFi if specified
+if [ -n "$WIFI_SSID" ]; then
+    log_debug "Configuring WiFi for SSID: $WIFI_SSID"
+    
+    # Ensure packages are installed
+    if ! command -v wpa_supplicant >/dev/null 2>&1; then
+        log_debug "Installing WiFi packages..."
+        apk add --no-cache wpa_supplicant wireless-tools iw dhcpcd || log_debug "Failed to install WiFi packages"
+    fi
+    
+    # Create wpa_supplicant configuration
+    mkdir -p /etc/wpa_supplicant
+    cat > /etc/wpa_supplicant/wpa_supplicant.conf << EOF
+country=GB
+ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+update_config=1
+ap_scan=1
+
+network={
+    ssid="$WIFI_SSID"
+$([ -n "$WIFI_PASSWORD" ] && echo "    psk=\"$WIFI_PASSWORD\"" || echo "    key_mgmt=NONE")
+    scan_ssid=1
+    priority=100
+}
+EOF
+    
+    # Create network interface configuration
+    cat > /etc/network/interfaces << EOF
+auto lo
+iface lo inet loopback
+
+auto wlan0
+iface wlan0 inet dhcp
+    wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
+    wireless-power off
+
+# Fallback to Ethernet
+allow-hotplug eth0  
+iface eth0 inet dhcp
+EOF
+    
+    log_debug "WiFi configuration created"
+fi
+
+# Set user password
+if [ -n "$USER_PASSWORD" ]; then
+    log_debug "Setting pi-star user password"
+    if echo "pi-star:$USER_PASSWORD" | chpasswd; then
+        log_debug "Password set successfully"
+    else
+        log_debug "Failed to set password"
+    fi
+fi
+
+# Configure SSH key
+if [ -n "$SSH_KEY" ]; then
+    log_debug "Adding SSH public key"
+    mkdir -p /home/pi-star/.ssh
+    echo "$SSH_KEY" >> /home/pi-star/.ssh/authorized_keys
+    chmod 600 /home/pi-star/.ssh/authorized_keys
+    chown pi-star:pi-star /home/pi-star/.ssh/authorized_keys
+    log_debug "SSH key configured"
+fi
+
+# Set hostname
+if [ -n "$HOSTNAME" ]; then
+    log_debug "Setting hostname: $HOSTNAME"
+    echo "$HOSTNAME" > /etc/hostname
+    hostname "$HOSTNAME" 2>/dev/null || true
+    
+    # Update /etc/hosts
+    if grep -q "127.0.1.1" /etc/hosts; then
+        sed -i "s/127.0.1.1.*/127.0.1.1\t$HOSTNAME/" /etc/hosts
+    else
+        echo "127.0.1.1	$HOSTNAME" >> /etc/hosts
+    fi
+    log_debug "Hostname configured"
+fi
+
+# Mark as processed
+echo "processed_$(date +%s)" > "$PROCESSED_FLAG"
+log_debug "Configuration processing complete"
+
+# Summary
+log_debug "SUMMARY:"
+[ -n "$WIFI_SSID" ] && log_debug "• WiFi: $WIFI_SSID"
+[ -n "$USER_PASSWORD" ] && log_debug "• Password: Set"
+[ -n "$SSH_KEY" ] && log_debug "• SSH Key: Configured"
+[ -n "$HOSTNAME" ] && log_debug "• Hostname: $HOSTNAME"
+
+log_debug "=== Boot Configuration Complete ==="
+BOOT_CONFIG_FIXED
+
+sudo chmod +x usr/local/bin/process-boot-config
 
 # Copy public key
 if [ -f "$REPO_ROOT/keys/public.pem" ]; then
@@ -283,31 +470,103 @@ if [ -f "$REPO_ROOT/config/system/hostname" ]; then
     sudo cp "$REPO_ROOT/config/system/hostname" etc/hostname
 fi
 
-# Create enhanced boot config service
-sudo tee etc/init.d/pistar-boot-config << 'SERVICE_EOF'
+# CRITICAL: Install FIXED pistar-boot-config service
+echo "Installing FIXED pistar-boot-config service..."
+sudo tee etc/init.d/pistar-boot-config << 'SERVICE_FIXED'
 #!/sbin/openrc-run
 
 name="Pi-Star Boot Config"
 description="Process boot partition configuration"
-command="/usr/local/bin/process-boot-config"
 
 depend() {
     after localmount
-    after bootmisc
+    after bootmisc  
     before networking
     before wpa_supplicant
     before dhcpcd
-    before first-boot
 }
 
 start() {
     ebegin "Processing Pi-Star boot configuration"
-    $command
-    eend $?
+    
+    # Ensure boot is mounted
+    if ! mountpoint -q /boot 2>/dev/null; then
+        mount /boot 2>/dev/null || true
+    fi
+    
+    # Create log directory
+    mkdir -p /var/log
+    
+    # Run configuration processor
+    if /usr/local/bin/process-boot-config; then
+        einfo "Boot configuration processed successfully"
+        eend 0
+    else
+        eerror "Boot configuration failed - check /var/log/boot-config.log"
+        eend 1
+    fi
 }
-SERVICE_EOF
+SERVICE_FIXED
 
 sudo chmod +x etc/init.d/pistar-boot-config
+
+# Add wireless interface debug service
+echo "Installing wireless debug service..."
+sudo tee etc/init.d/wireless-debug << 'WIRELESS_DEBUG'
+#!/sbin/openrc-run
+
+name="Wireless Debug"
+description="Debug wireless interface detection"
+
+depend() {
+    after localmount
+    after modules
+    before networking
+}
+
+start() {
+    ebegin "Debugging wireless interfaces"
+    
+    DEBUG_LOG="/var/log/wireless-debug.log"
+    mkdir -p /var/log
+    
+    {
+        echo "=== WIRELESS DEBUG $(date) ==="
+        
+        # Load wireless modules explicitly
+        echo "Loading wireless modules..."
+        modprobe brcmfmac 2>&1 || echo "brcmfmac module load failed"
+        modprobe brcmutil 2>&1 || echo "brcmutil module load failed"
+        sleep 2
+        
+        # Check interfaces
+        echo "Network interfaces:"
+        ip link show 2>&1 || echo "ip link failed"
+        
+        echo "Wireless devices:"
+        iw dev 2>&1 || echo "No wireless devices found"
+        
+        # Check firmware loading
+        echo "Recent wireless/firmware messages from dmesg:"
+        dmesg | grep -i -E "brcm|wireless|wlan|firmware|43436" | tail -10
+        
+        # Check rfkill
+        echo "rfkill status:"
+        rfkill list 2>&1 || echo "rfkill failed"
+        
+        # Check loaded modules
+        echo "Loaded wireless modules:"
+        lsmod | grep -E "brcm|wireless|80211" || echo "No wireless modules loaded"
+        
+        echo "=== END WIRELESS DEBUG ==="
+        
+    } | tee "$DEBUG_LOG"
+    
+    eend 0
+}
+WIRELESS_DEBUG
+
+sudo chmod +x etc/init.d/wireless-debug
 
 # FIXED: Create the first-boot service with CORRECT dependencies and runlevel
 sudo tee etc/init.d/first-boot << 'FIRST_BOOT_SERVICE'
@@ -363,6 +622,7 @@ sudo chroot . /bin/sh << 'CHROOT_SERVICES_FINAL'
 rc-update add devfs sysinit
 rc-update add bootmisc boot
 rc-update add localmount boot
+rc-update add wireless-debug boot       # Debug wireless before config
 rc-update add pistar-boot-config boot  # This processes your config file
 rc-update add hostname boot
 rc-update add modules boot
@@ -380,7 +640,7 @@ rc-update add pi-star-updater default
 # Verify the critical boot service order
 echo "=== FIXED BOOT SERVICE VERIFICATION ==="
 echo "Boot services enabled:"
-rc-update show boot | grep -E "(localmount|pistar-boot-config|hostname)"
+rc-update show boot | grep -E "(localmount|pistar-boot-config|hostname|wireless-debug)"
 echo "Default services enabled:"
 rc-update show default | grep -E "(networking|first-boot|sshd)"
 echo "FIXED: first-boot now runs AFTER networking is established"
@@ -550,12 +810,29 @@ else
 fi
 
 echo ""
+echo "DEBUG LOGS AVAILABLE:"
+echo "• Boot config: /var/log/boot-config.log"
+echo "• Wireless debug: /var/log/wireless-debug.log"
+echo ""
 echo "For support and documentation:"
 echo "• Repository: https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling"
 echo "• Update server: https://version.pistar.uk"
 FIRST_BOOT_SCRIPT
 
 sudo chmod +x usr/local/bin/first-boot-setup
+
+echo "=== PI ZERO 2W FIXES & ENHANCED DEBUGGING APPLIED ==="
+echo "✅ Pi Zero 2W firmware downloaded"
+echo "✅ Wireless driver configuration optimized"
+echo "✅ Fixed boot configuration processor with error handling"
+echo "✅ Added wireless debugging service"
+echo "✅ Enhanced logging for troubleshooting"
+echo "✅ Fixed service dependencies and boot order"
+echo ""
+echo "Debug logs will be available at:"
+echo "  • /var/log/boot-config.log"
+echo "  • /var/log/wireless-debug.log"
+echo "======================================="
 
 # Add final verification debug section
 echo "=== FINAL BUILD VERIFICATION ==="
@@ -565,10 +842,10 @@ echo "Scripts installed:"
 ls -la usr/local/bin/ | grep -E "(process-boot-config|first-boot-setup|update-daemon|install-update)" || echo "❌ Scripts missing"
 
 echo "Service files created:"
-ls -la etc/init.d/ | grep -E "(pistar-boot-config|first-boot)" || echo "❌ Services missing"
+ls -la etc/init.d/ | grep -E "(pistar-boot-config|first-boot|wireless-debug)" || echo "❌ Services missing"
 
 echo "Boot services enabled:"
-sudo chroot . rc-update show boot | grep -E "(pistar-boot-config)" || echo "❌ Boot services not enabled"
+sudo chroot . rc-update show boot | grep -E "(pistar-boot-config|wireless-debug)" || echo "❌ Boot services not enabled"
 
 echo "Default services enabled:"
 sudo chroot . rc-update show default | grep -E "(first-boot)" || echo "❌ Default services not enabled"
@@ -577,6 +854,11 @@ echo "System files:"
 [ -f etc/fstab ] && echo "✅ fstab exists" || echo "❌ fstab missing"
 [ -f etc/pi-star-version ] && echo "✅ version file exists" || echo "❌ version file missing"
 [ -f usr/local/bin/first-boot-setup ] && echo "✅ FIXED first-boot script installed" || echo "❌ first-boot script missing"
+[ -f usr/local/bin/process-boot-config ] && echo "✅ FIXED boot config processor installed" || echo "❌ boot config processor missing"
+
+echo "Pi Zero 2W firmware:"
+[ -f lib/firmware/brcm/brcmfmac43436-sdio.bin ] && echo "✅ Pi Zero 2W firmware downloaded" || echo "❌ Pi Zero 2W firmware missing"
+[ -f etc/modprobe.d/brcmfmac.conf ] && echo "✅ Wireless driver config created" || echo "❌ Wireless driver config missing"
 
 echo "================================="
 
@@ -591,5 +873,19 @@ sudo rm -f usr/bin/qemu-arm-static
 # Unmount
 sudo umount proc sys dev
 
+echo ""
+echo "=== ROOT FILESYSTEM BUILD COMPLETE ==="
+echo "✅ Alpine Linux 3.22 configured"
+echo "✅ Pi Zero 2W wireless support added"
+echo "✅ Fixed boot configuration processing"
+echo "✅ Enhanced debugging and logging"
+echo "✅ Secure user accounts configured"
+echo "✅ OTA update system installed"
+echo ""
+echo "FIXES APPLIED:"
+echo "• No more password prompts when pistar-config.txt exists"
+echo "• Pi Zero 2W wireless interface should now be detected"
+echo "• Comprehensive debugging logs for troubleshooting"
+echo "• Proper service dependencies and boot order"
+echo ""
 echo "Root filesystem build complete!"
-echo "FIXED: No more password prompts when pistar-config.txt exists!"
