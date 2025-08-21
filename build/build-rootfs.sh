@@ -133,42 +133,68 @@ rc-update add sshd default
 rc-update add chronyd default
 CHROOT_SERVICES
 
-# Create user accounts
-echo "Creating user accounts..."
+# Create user accounts with secure defaults
+echo "Creating user accounts with secure configuration..."
 sudo chroot . /bin/sh << 'CHROOT_USERS'
-# Set root password (change this!)
-echo "root:pistar" | chpasswd
+# Disable root password completely
+passwd -l root
 
-# Create pi-star user
+# Create pi-star user with no initial password (will be set from config)
 adduser -D -s /bin/bash pi-star
-echo "pi-star:pi-star" | chpasswd
+passwd -u pi-star  # Unlock account but no password set
 
-# Add pi-star to sudo group (create group first if needed)
+# Add pi-star to essential groups
 addgroup sudo 2>/dev/null || true
 adduser pi-star sudo
-
-# Add pi-star to other useful groups
 adduser pi-star dialout  # Serial port access
 adduser pi-star audio    # Audio access
 adduser pi-star video    # Video/GPIO access
-adduser pi-star gpio     # GPIO access (if group exists)
+adduser pi-star gpio 2>/dev/null || true  # GPIO access
 
 # Create pi-star home directory structure
 mkdir -p /home/pi-star/.ssh
 mkdir -p /home/pi-star/bin
 chown -R pi-star:pi-star /home/pi-star
+chmod 700 /home/pi-star/.ssh
 
-# Enable sudo without password for pi-star user
+# Enable passwordless sudo for pi-star user
 echo "pi-star ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/pi-star
 chmod 440 /etc/sudoers.d/pi-star
 
-# Set up SSH key directory permissions
-chmod 700 /home/pi-star/.ssh
-chown pi-star:pi-star /home/pi-star/.ssh
+# Disable SSH root login and password auth by default
+cat > /etc/ssh/sshd_config << 'EOF'
+# Pi-Star SSH Configuration - Security Hardened
+Port 22
+Protocol 2
 
-echo "User accounts created:"
-echo "  root:pistar (full access)"
-echo "  pi-star:pi-star (sudo access)"
+# Security settings - no root login, no password auth by default
+PermitRootLogin no
+PasswordAuthentication no
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+
+# Will be enabled if password set in boot config
+#PasswordAuthentication yes
+
+# Disable dangerous features
+PermitEmptyPasswords no
+X11Forwarding no
+AllowTcpForwarding no
+
+# Connection settings
+ClientAliveInterval 300
+ClientAliveCountMax 2
+MaxAuthTries 3
+MaxSessions 2
+
+# Logging
+SyslogFacility AUTH
+LogLevel INFO
+EOF
+
+echo "Secure user configuration complete:"
+echo "  root: disabled (no password, no SSH access)"
+echo "  pi-star: passwordless sudo, SSH key auth only (until boot config processed)"
 CHROOT_USERS
 
 # Install Pi-Star (placeholder or actual)
@@ -271,7 +297,7 @@ EOF
 echo "SSH configured with security settings"
 CHROOT_SSH
 
-# Create services
+# Create Pi-Star Update services
 sudo tee etc/init.d/pi-star-updater << 'SERVICE_EOF'
 #!/sbin/openrc-run
 
@@ -288,6 +314,21 @@ SERVICE_EOF
 
 sudo chmod +x etc/init.d/pi-star-updater
 sudo chroot . rc-update add pi-star-updater default
+
+# Create Pi-Star Boot Config service
+sudo tee etc/init.d/pistar-boot-config << 'SERVICE_EOF'
+#!/sbin/openrc-run
+name="Pi-Star Boot Config"
+description="Process boot partition configuration"
+command="/usr/local/bin/process-boot-config"
+depend() {
+    after localmount
+    before networking
+}
+SERVICE_EOF
+
+sudo chmod +x etc/init.d/pistar-boot-config
+sudo chroot . rc-update add pistar-boot-config boot
 
 # Cleanup
 echo "Cleaning up..."

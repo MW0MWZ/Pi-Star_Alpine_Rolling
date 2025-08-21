@@ -44,19 +44,22 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Create partition table and partitions
-echo "Creating partition table..."
+# Create partition table and partitions for 2GB SD card
+echo "Creating partition table for 2GB SD card..."
 parted -s "$LOOP_DEVICE" mklabel msdos
 
-echo "Creating partitions..."
-# Boot partition - 256MB (1MiB to 257MiB)
-parted -s "$LOOP_DEVICE" mkpart primary fat32 1MiB 257MiB
-# RootFS-A - 1GB (257MiB to 1281MiB)  
-parted -s "$LOOP_DEVICE" mkpart primary ext4 257MiB 1281MiB
-# RootFS-B - 1GB (1281MiB to 2305MiB)
-parted -s "$LOOP_DEVICE" mkpart primary ext4 1281MiB 2305MiB
-# Data partition - 500MB (2305MiB to 2817MiB)
-parted -s "$LOOP_DEVICE" mkpart primary ext4 2305MiB 2817MiB
+echo "Creating optimized partitions for 2GB card..."
+# Boot partition - 128MB (sufficient for Pi firmware + config)
+parted -s "$LOOP_DEVICE" mkpart primary fat32 1MiB 129MiB
+
+# RootFS-A - 650MB (minimal OS footprint)  
+parted -s "$LOOP_DEVICE" mkpart primary ext4 129MiB 779MiB
+
+# RootFS-B - 650MB (identical to A)
+parted -s "$LOOP_DEVICE" mkpart primary ext4 779MiB 1429MiB
+
+# Data partition - 500MB (Pi-Star config, logs, databases)
+parted -s "$LOOP_DEVICE" mkpart primary ext4 1429MiB 1929MiB
 
 # Set boot flag
 parted -s "$LOOP_DEVICE" set 1 boot on
@@ -65,18 +68,18 @@ parted -s "$LOOP_DEVICE" set 1 boot on
 partprobe "$LOOP_DEVICE"
 sleep 2
 
-# Format partitions
-echo "Formatting boot partition..."
-mkfs.vfat -F 32 -n "PISTAR_BOOT" "${LOOP_DEVICE}p1"
+# Format partitions with optimized settings
+echo "Formatting boot partition (128MB)..."
+mkfs.vfat -F 32 -n "PISTAR_BOOT" -S 512 "${LOOP_DEVICE}p1"
 
-echo "Formatting RootFS-A partition..."
-mkfs.ext4 -F -L "PISTAR_ROOT_A" "${LOOP_DEVICE}p2"
+echo "Formatting RootFS-A partition (650MB)..."
+mkfs.ext4 -F -L "PISTAR_ROOT_A" -m 1 -O ^has_journal "${LOOP_DEVICE}p2"
 
-echo "Formatting RootFS-B partition..."  
-mkfs.ext4 -F -L "PISTAR_ROOT_B" "${LOOP_DEVICE}p3"
+echo "Formatting RootFS-B partition (650MB)..."  
+mkfs.ext4 -F -L "PISTAR_ROOT_B" -m 1 -O ^has_journal "${LOOP_DEVICE}p3"
 
-echo "Formatting data partition..."
-mkfs.ext4 -F -L "PISTAR_DATA" "${LOOP_DEVICE}p4"
+echo "Formatting data partition (500MB)..."
+mkfs.ext4 -F -L "PISTAR_DATA" -m 1 "${LOOP_DEVICE}p4"
 
 # Wait for filesystem creation to complete and sync
 sync
