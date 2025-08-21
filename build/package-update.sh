@@ -65,7 +65,10 @@ PACKAGE_SIZE=$(stat -c%s "$PACKAGE_PATH")
 echo "Package created successfully: $PACKAGE_NAME ($(numfmt --to=iec-i --suffix=B $PACKAGE_SIZE))"
 
 # Sign the package if private key exists
+# Fixed: Use correct path relative to GITHUB_WORKSPACE
 PRIVATE_KEY_PATH="${GITHUB_WORKSPACE}/keys/private.pem"
+echo "Looking for private key at: $PRIVATE_KEY_PATH"
+
 if [ -f "$PRIVATE_KEY_PATH" ]; then
     echo "Signing package with private key..."
     openssl dgst -sha256 -sign "$PRIVATE_KEY_PATH" -out "$SIGNATURE_PATH" "$PACKAGE_PATH"
@@ -83,6 +86,8 @@ if [ -f "$PRIVATE_KEY_PATH" ]; then
                 echo "Warning: Signature verification failed"
                 exit 1
             fi
+        else
+            echo "Warning: Public key not found at $PUBLIC_KEY_PATH - skipping signature verification"
         fi
     else
         echo "Error: Failed to create signature"
@@ -90,6 +95,9 @@ if [ -f "$PRIVATE_KEY_PATH" ]; then
     fi
 else
     echo "Warning: Private key not found at $PRIVATE_KEY_PATH - package will not be signed"
+    echo "Available files in keys directory:"
+    ls -la "${GITHUB_WORKSPACE}/keys/" 2>/dev/null || echo "Keys directory not found"
+    echo "GITHUB_WORKSPACE is: ${GITHUB_WORKSPACE}"
 fi
 
 # Generate checksums
@@ -116,7 +124,8 @@ cat > "package-manifest.json" << EOF
     "signature": {
         "file": "${PACKAGE_NAME}.sig",
         "algorithm": "SHA256withRSA",
-        "created": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        "created": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+        "present": $([ -f "$SIGNATURE_PATH" ] && echo "true" || echo "false")
     },
     "build": {
         "rootfs_source": "$ROOTFS_DIR",
@@ -144,6 +153,8 @@ echo "  Files: $(tar -tzf "$PACKAGE_PATH" | wc -l) files"
 echo "  Package: $PACKAGE_PATH"
 if [ -f "$SIGNATURE_PATH" ]; then
     echo "  Signature: $SIGNATURE_PATH"
+else
+    echo "  Signature: Not created (no private key)"
 fi
 
 echo ""
