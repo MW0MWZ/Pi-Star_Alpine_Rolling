@@ -116,10 +116,35 @@ echo "📡 Installing shared boot partition..."
 
 # Install Pi firmware from hybrid rootfs
 if [ -d "$ROOTFS_PATH/boot" ]; then
-    echo "📋 Copying Pi firmware and kernels..."
+    echo "📋 Copying Pi firmware and kernels (FAT32 compatible)..."
     
-    # Copy ALL boot contents from hybrid (firmware + kernels + device trees)
-    cp -r "$ROOTFS_PATH/boot"/* mnt/boot/
+    # Copy files one by one to avoid symlink issues on FAT32
+    for item in "$ROOTFS_PATH/boot"/*; do
+        if [ -f "$item" ]; then
+            # Regular file - copy directly
+            cp "$item" mnt/boot/
+        elif [ -d "$item" ]; then
+            # Directory - copy recursively, handling symlinks
+            dirname=$(basename "$item")
+            mkdir -p "mnt/boot/$dirname"
+            find "$item" -type f -exec cp {} "mnt/boot/$dirname/" \; 2>/dev/null || true
+        elif [ -L "$item" ]; then
+            # Symlink - resolve and copy target if it exists
+            target=$(readlink "$item")
+            basename_item=$(basename "$item")
+            
+            # Try to find the actual file
+            if [ -f "$target" ]; then
+                cp "$target" "mnt/boot/$basename_item"
+            elif [ -f "$ROOTFS_PATH/boot/$target" ]; then
+                cp "$ROOTFS_PATH/boot/$target" "mnt/boot/$basename_item"
+            elif [ -f "$(dirname "$item")/$target" ]; then
+                cp "$(dirname "$item")/$target" "mnt/boot/$basename_item"
+            else
+                echo "⚠️  Skipping broken symlink: $basename_item -> $target"
+            fi
+        fi
+    done
     
     echo "✅ Installed complete boot system:"
     echo "   • Pi firmware (start.elf, etc.)"
