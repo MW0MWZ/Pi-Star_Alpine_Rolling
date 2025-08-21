@@ -131,82 +131,38 @@ apk add --no-cache linux-rpi
 # ULTRA-MINIMAL: WiFi-only firmware (no Bluetooth bloat)
 echo "Installing MINIMAL WiFi-only firmware (no Bluetooth)..."
 
-# First, check if the package exists
-echo "Checking Alpine package availability..."
-if apk search linux-firmware-brcm | grep -q "linux-firmware-brcm"; then
-    echo "✅ linux-firmware-brcm package available"
-    
-    # Install only Broadcom WiFi firmware for Pi wireless chips
-    apk add --no-cache linux-firmware-brcm    # Pi WiFi chips only
-    
-    # Verify what Alpine actually installed
-    echo "=== VERIFYING ALPINE FIRMWARE INSTALLATION ==="
-    echo "Checking Alpine firmware installation..."
+# Note: linux-firmware-brcm was already installed as dependency of linux-rpi
+echo "✅ linux-firmware-brcm already installed as kernel dependency"
 
-    if [ -d /lib/firmware ]; then
-        echo "✅ Firmware directory exists"
-        echo "Firmware subdirectories:"
-        ls -la /lib/firmware/ | head -10
+# Verify what Alpine actually installed
+echo "=== VERIFYING ALPINE FIRMWARE INSTALLATION ==="
+echo "Checking Alpine firmware installation..."
+
+if [ -d /lib/firmware ]; then
+    echo "✅ Firmware directory exists"
+    
+    if [ -d /lib/firmware/brcm ]; then
+        echo "✅ Broadcom firmware directory exists"
         
-        if [ -d /lib/firmware/brcm ]; then
-            echo "✅ Broadcom firmware directory exists"
-            echo "Broadcom firmware files installed:"
-            ls -la /lib/firmware/brcm/ | head -20
-            
-            # Count brcmfmac files specifically
-            BRCM_COUNT=$(find /lib/firmware/brcm/ -name "brcmfmac*" 2>/dev/null | wc -l)
-            echo "Broadcom WiFi firmware files found: $BRCM_COUNT"
-            
-            if [ "$BRCM_COUNT" -gt 0 ]; then
-                echo "✅ Alpine linux-firmware-brcm package working correctly"
-            else
-                echo "⚠️  No brcmfmac files found - checking package contents"
-                apk info -L linux-firmware-brcm | grep brcmfmac | head -10 || echo "Package not installed or no brcmfmac files"
-            fi
+        # Count brcmfmac files specifically
+        BRCM_COUNT=$(find /lib/firmware/brcm/ -name "brcmfmac*" 2>/dev/null | wc -l)
+        echo "Broadcom WiFi firmware files found: $BRCM_COUNT"
+        
+        if [ "$BRCM_COUNT" -gt 0 ]; then
+            echo "✅ Alpine linux-firmware-brcm package working correctly"
+            echo "Sample firmware files:"
+            find /lib/firmware/brcm/ -name "brcmfmac*" | head -5
         else
-            echo "❌ No brcm directory found"
+            echo "⚠️  No brcmfmac files found"
         fi
     else
-        echo "❌ No firmware directory found"
+        echo "❌ No brcm directory found"
     fi
-    
-    echo "================================================="
 else
-    echo "⚠️  linux-firmware-brcm package not found in Alpine 3.22"
-    echo "Available firmware packages:"
-    apk search linux-firmware | head -10
-    
-    echo "Falling back to manual firmware installation..."
-    # Create the directory structure
-    mkdir -p /lib/firmware/brcm
-    
-    # Download essential Pi WiFi firmware manually
-    echo "Downloading essential Pi WiFi firmware..."
-    declare -a essential_firmware=(
-        "brcmfmac43430-sdio.bin"     # Pi Zero W, Pi 3
-        "brcmfmac43430-sdio.txt"
-        "brcmfmac43455-sdio.bin"     # Pi 3B+, Pi 4
-        "brcmfmac43455-sdio.txt"
-        "brcmfmac43436-sdio.bin"     # Pi Zero 2W
-        "brcmfmac43436-sdio.txt"
-        "brcmfmac43456-sdio.bin"     # Pi 5
-        "brcmfmac43456-sdio.txt"
-    )
-    
-    for firmware in "${essential_firmware[@]}"; do
-        echo "Downloading $firmware..."
-        if wget -q -O "/lib/firmware/brcm/$firmware" \
-            "https://github.com/RPi-Distro/firmware-nonfree/raw/master/brcm80211/brcm/$firmware"; then
-            echo "✅ Downloaded $firmware"
-        else
-            echo "⚠️  Could not download $firmware"
-        fi
-    done
-    
-    # Verify manual download
-    MANUAL_COUNT=$(find /lib/firmware/brcm/ -name "brcmfmac*" 2>/dev/null | wc -l)
-    echo "Manually downloaded firmware files: $MANUAL_COUNT"
+    echo "❌ No firmware directory found"
 fi
+
+echo "================================================="
 
 # Skip Cypress entirely - it's mainly for Bluetooth on Pi Zero 2W
 # apk add --no-cache linux-firmware-cypress  # ❌ Bluetooth/combo chips - not needed
