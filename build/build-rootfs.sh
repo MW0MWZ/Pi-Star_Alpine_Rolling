@@ -128,30 +128,17 @@ echo "Installing PURE ALPINE Raspberry Pi support..."
 echo "Installing Alpine Raspberry Pi kernel..."
 apk add --no-cache linux-rpi
 
-# OPTIMIZED: Install only Pi-specific firmware (not the entire firmware bloat)
-echo "Installing MINIMAL Pi-specific firmware only..."
+# ULTRA-MINIMAL: WiFi-only firmware (no Bluetooth bloat)
+echo "Installing MINIMAL WiFi-only firmware (no Bluetooth)..."
 
-# Instead of the massive linux-firmware package, let's be surgical:
-# apk add --no-cache linux-firmware  # ❌ This is 200MB+ of mostly useless firmware
+# Install only Broadcom WiFi firmware for Pi wireless chips
+apk add --no-cache linux-firmware-brcm    # Pi WiFi chips only
 
-# Install only essential Pi wireless firmware
-echo "Installing Broadcom wireless firmware for Pi..."
-apk add --no-cache linux-firmware-brcm    # Pi wireless chips
+# Skip Cypress entirely - it's mainly for Bluetooth on Pi Zero 2W
+# apk add --no-cache linux-firmware-cypress  # ❌ Bluetooth/combo chips - not needed
 
-# Install only if Cypress chips are present (Pi Zero 2W specific)
-echo "Installing Cypress firmware for specific Pi models..."
-apk add --no-cache linux-firmware-cypress  # Pi Zero 2W Bluetooth/WiFi
-
-# Skip these massive firmware packages that Pi doesn't need:
-# linux-firmware-ath9k     # ❌ Atheros - not used on Pi  
-# linux-firmware-ath10k    # ❌ More Atheros - not used on Pi
-# linux-firmware-intel     # ❌ Intel wireless - not used on Pi
-# linux-firmware-realtek   # ❌ Realtek - not used on Pi
-# linux-firmware-nvidia    # ❌ NVIDIA GPU - not used on Pi
-# linux-firmware-amd       # ❌ AMD GPU - not used on Pi
-# linux-firmware-radeon    # ❌ Radeon GPU - not used on Pi
-
-echo "✅ Minimal Pi-specific firmware installed (instead of 200MB+ bloat)"
+echo "✅ Ultra-minimal WiFi-only firmware installed"
+echo "✅ Bluetooth firmware skipped - smaller image, faster boot"
 echo "Pure Alpine Pi packages installed - no Pi Foundation kernel mixing"
 
 # CRITICAL FIX: Trigger kernel installation and copy files
@@ -330,28 +317,43 @@ sudo cp lib/firmware/brcm/brcmfmac43455-sdio.txt \
 sudo cp lib/firmware/brcm/brcmfmac43456-sdio.txt \
      lib/firmware/brcm/brcmfmac43456-sdio.raspberrypi,5-model-b.txt 2>/dev/null || true
 
-# Configure wireless driver for all Pi models
-echo "Configuring wireless drivers for all Pi models..."
+# Configure wireless driver for all Pi models (WiFi-only, no Bluetooth)
+echo "Configuring WiFi-only wireless drivers (Bluetooth disabled)..."
 sudo tee etc/modprobe.d/brcmfmac.conf << 'EOF'
-# Universal Pi wireless driver configuration
+# Ultra-minimal Pi wireless configuration - WiFi only, no Bluetooth
 # Optimized for Pi Zero 2W but works on all models
 options brcmfmac roamoff=1 feature_disable=0x282000
 
 # Alternative for stubborn connections:
 # options brcmfmac feature_disable=0x2000
 
-# Prevent module conflicts
+# DISABLE Bluetooth completely (saves resources and boot time)
+blacklist btbcm
+blacklist hci_uart
+blacklist btrtl
+blacklist btintel
+blacklist bluetooth
+
+# Prevent other wireless module conflicts
 blacklist b43
 blacklist b43legacy
 blacklist ssb
+
+# Disable Pi's onboard Bluetooth at kernel level
+# This prevents the Bluetooth modules from loading entirely
 EOF
 
-# Force module loading at boot
+# Force WiFi-only module loading at boot (no Bluetooth modules)
 sudo tee etc/modules-load.d/pi-wireless.conf << 'EOF'
-# Load Pi wireless modules at boot
+# Load ONLY WiFi modules at boot (Bluetooth disabled)
 brcmfmac
 brcmutil
 cfg80211
+
+# Explicitly do NOT load:
+# btbcm (Bluetooth)
+# hci_uart (Bluetooth UART)
+# bluetooth (Bluetooth core)
 EOF
 
 # Enable essential services
@@ -731,11 +733,17 @@ start() {
         echo "Kernel: $(uname -r)"
         echo "Architecture: $(uname -m)"
         
-        # Load wireless modules for all Pi models
-        echo "Loading wireless modules..."
+        # Load WiFi-only modules for all Pi models (Bluetooth disabled)
+        echo "Loading WiFi modules (Bluetooth disabled for minimal footprint)..."
         modprobe brcmfmac 2>&1 || echo "brcmfmac load failed"
         modprobe brcmutil 2>&1 || echo "brcmutil load failed"
         modprobe cfg80211 2>&1 || echo "cfg80211 load failed"
+        
+        # Ensure Bluetooth modules are NOT loaded
+        echo "Ensuring Bluetooth modules are blacklisted..."
+        rmmod btbcm 2>/dev/null || true
+        rmmod hci_uart 2>/dev/null || true
+        rmmod bluetooth 2>/dev/null || true
         
         # Give modules time to initialize
         sleep 2
