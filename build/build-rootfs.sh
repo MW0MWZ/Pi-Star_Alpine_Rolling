@@ -131,7 +131,58 @@ apk add --no-cache \
     linux-firmware-ath9k
 
 echo "Pure Alpine Pi packages installed - no Pi Foundation kernel mixing"
+
+# CRITICAL FIX: Copy kernel files to accessible location for SD image build
+echo "Copying Alpine kernel files for SD image build..."
+mkdir -p /tmp/kernel-export
+
+# Copy kernel files to a location accessible outside chroot
+if [ -f /boot/vmlinuz-* ]; then
+    cp /boot/vmlinuz-* /tmp/kernel-export/
+    echo "Kernel exported: $(ls /boot/vmlinuz-*)"
+else
+    echo "Warning: No kernel found in /boot/ yet"
+fi
+
+if [ -f /boot/initramfs-* ]; then
+    cp /boot/initramfs-* /tmp/kernel-export/
+    echo "Initramfs exported: $(ls /boot/initramfs-*)"
+else
+    echo "Warning: No initramfs found in /boot/"
+fi
+
+# Also export module information
+if [ -d /lib/modules ]; then
+    ls /lib/modules > /tmp/kernel-export/module-versions.txt
+    echo "Module versions exported: $(cat /tmp/kernel-export/module-versions.txt)"
+fi
+
+echo "Kernel files exported to /tmp/kernel-export for SD image build"
 CHROOT_PACKAGES
+
+# CRITICAL FIX: Copy exported kernel files outside the chroot
+echo "=== EXPORTING ALPINE KERNEL FILES ==="
+if [ -d "$BUILD_DIR/rootfs/tmp/kernel-export" ]; then
+    echo "Found exported kernel files, copying to build directory..."
+    mkdir -p "$BUILD_DIR/kernel-files"
+    cp -r "$BUILD_DIR/rootfs/tmp/kernel-export"/* "$BUILD_DIR/kernel-files/"
+    
+    echo "Exported kernel files:"
+    ls -la "$BUILD_DIR/kernel-files/"
+    
+    # Also create symlinks in rootfs/boot for compatibility
+    mkdir -p "$BUILD_DIR/rootfs/boot"
+    if [ -f "$BUILD_DIR/kernel-files/vmlinuz-"* ]; then
+        cp "$BUILD_DIR/kernel-files"/vmlinuz-* "$BUILD_DIR/rootfs/boot/"
+        echo "Kernel copied to rootfs/boot for compatibility"
+    fi
+    if [ -f "$BUILD_DIR/kernel-files/initramfs-"* ]; then
+        cp "$BUILD_DIR/kernel-files"/initramfs-* "$BUILD_DIR/rootfs/boot/"
+        echo "Initramfs copied to rootfs/boot for compatibility"
+    fi
+else
+    echo "Warning: No kernel files were exported from chroot"
+fi
 
 # PURE ALPINE: Download comprehensive Pi firmware for ALL models
 echo "=== DOWNLOADING COMPREHENSIVE PI FIRMWARE ==="
@@ -886,12 +937,14 @@ echo "✅ Fixed boot configuration processor"
 echo "✅ Alpine Pi hardware detection service"
 echo "✅ Enhanced logging for troubleshooting"
 echo "✅ Fixed service dependencies and boot order"
+echo "✅ CRITICAL FIX: Kernel files exported for SD image build"
 echo ""
 echo "Key improvements:"
 echo "• No more kernel/module version mismatches"
 echo "• Pure Alpine kernel ensures module compatibility"
 echo "• Comprehensive firmware for all Pi models"
 echo "• Clean, maintainable Alpine-only approach"
+echo "• Kernel files properly exported for SD image build"
 echo ""
 echo "Debug logs will be available at:"
 echo "  • /var/log/boot-config.log"
@@ -930,11 +983,19 @@ echo "Pi firmware for all models:"
 [ -f lib/firmware/brcm/brcmfmac43455-sdio.bin ] && echo "✅ Pi 3B+ / Pi 4 firmware" || echo "❌ Pi 3B+ / Pi 4 firmware missing"
 [ -f lib/firmware/brcm/brcmfmac43456-sdio.bin ] && echo "✅ Pi 5 firmware" || echo "❌ Pi 5 firmware missing"
 
+echo "CRITICAL FIX: Kernel file export verification:"
+if [ -d "$BUILD_DIR/kernel-files" ]; then
+    echo "✅ Kernel files exported to: $BUILD_DIR/kernel-files"
+    ls -la "$BUILD_DIR/kernel-files/" || echo "❌ Kernel files directory empty"
+else
+    echo "❌ Kernel files not exported - SD image build may fail"
+fi
+
 echo "Alpine kernel verification:"
 if ls boot/vmlinuz-* >/dev/null 2>&1; then
-    echo "✅ Alpine kernel present: $(ls boot/vmlinuz-* | head -1)"
+    echo "✅ Alpine kernel present in rootfs/boot: $(ls boot/vmlinuz-* | head -1)"
 else
-    echo "❌ Alpine kernel missing"
+    echo "❌ Alpine kernel missing from rootfs/boot"
 fi
 
 if ls lib/modules/*/kernel/ >/dev/null 2>&1; then
@@ -971,6 +1032,7 @@ echo "✅ Fixed boot configuration processing"
 echo "✅ Enhanced debugging and logging"
 echo "✅ Secure user accounts configured"
 echo "✅ OTA update system installed"
+echo "✅ CRITICAL FIX: Kernel files exported for SD image build"
 echo ""
 echo "PURE ALPINE BENEFITS:"
 echo "• No kernel/module version mismatches (EVER)"

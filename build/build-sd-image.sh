@@ -96,36 +96,148 @@ mount "${LOOP_DEVICE}p2" mnt/root-a
 mount "${LOOP_DEVICE}p3" mnt/root-b
 mount "${LOOP_DEVICE}p4" mnt/data
 
-# PURE ALPINE: Install Alpine kernel and boot files instead of Pi Foundation firmware
+# FIXED: Check for rootfs directory and handle Alpine kernel properly
 echo "=== INSTALLING PURE ALPINE BOOT SYSTEM ==="
 
-# Find Alpine kernel in the built rootfs
+# Verify rootfs exists
 ROOTFS_PATH="/tmp/pi-star-build/rootfs"
+KERNEL_FILES_PATH="/tmp/pi-star-build/kernel-files"
 
 if [ ! -d "$ROOTFS_PATH" ]; then
     echo "Error: Alpine rootfs not found at $ROOTFS_PATH"
     echo "Please run build-rootfs.sh first"
+    echo "Available directories in /tmp/pi-star-build:"
+    ls -la /tmp/pi-star-build/ 2>/dev/null || echo "Build directory not found"
     exit 1
 fi
 
-# Find Alpine kernel files
-ALPINE_KERNEL=$(find "$ROOTFS_PATH/boot" -name "vmlinuz-*" -type f | head -1)
-ALPINE_INITRD=$(find "$ROOTFS_PATH/boot" -name "initramfs-*" -type f | head -1)
-ALPINE_MODULES=$(find "$ROOTFS_PATH/lib/modules" -maxdepth 1 -mindepth 1 -type d | head -1)
+echo "Found rootfs at: $ROOTFS_PATH"
+echo "Rootfs contents:"
+ls -la "$ROOTFS_PATH/" | head -10
 
+# FIXED: Use exported kernel files from build-rootfs.sh
+echo "Searching for Alpine kernel files..."
+
+ALPINE_KERNEL=""
+ALPINE_INITRD=""
+ALPINE_MODULES=""
+
+# Method 1: Use exported kernel files (preferred method)
+if [ -d "$KERNEL_FILES_PATH" ]; then
+    echo "✅ Found exported kernel files at: $KERNEL_FILES_PATH"
+    ls -la "$KERNEL_FILES_PATH/"
+    
+    ALPINE_KERNEL=$(find "$KERNEL_FILES_PATH" -name "vmlinuz-*" -type f | head -1)
+    ALPINE_INITRD=$(find "$KERNEL_FILES_PATH" -name "initramfs-*" -type f | head -1)
+    
+    if [ -n "$ALPINE_KERNEL" ]; then
+        echo "✅ Using exported Alpine kernel: $ALPINE_KERNEL"
+    fi
+    if [ -n "$ALPINE_INITRD" ]; then
+        echo "✅ Using exported Alpine initramfs: $ALPINE_INITRD"
+    fi
+fi
+
+# Method 2: Look in rootfs/boot directory (fallback)
+if [ -z "$ALPINE_KERNEL" ] && [ -d "$ROOTFS_PATH/boot" ]; then
+    echo "Fallback: Checking $ROOTFS_PATH/boot for kernel files..."
+    ls -la "$ROOTFS_PATH/boot/" || true
+    ALPINE_KERNEL=$(find "$ROOTFS_PATH/boot" -name "vmlinuz-*" -type f 2>/dev/null | head -1)
+    ALPINE_INITRD=$(find "$ROOTFS_PATH/boot" -name "initramfs-*" -type f 2>/dev/null | head -1)
+    
+    if [ -n "$ALPINE_KERNEL" ]; then
+        echo "✅ Found kernel in rootfs/boot: $ALPINE_KERNEL"
+    fi
+fi
+
+# Method 3: Download Alpine kernel directly if still not found
 if [ -z "$ALPINE_KERNEL" ]; then
-    echo "Error: Alpine kernel not found in $ROOTFS_PATH/boot"
-    echo "Available files in boot:"
-    ls -la "$ROOTFS_PATH/boot/" || echo "Boot directory not found"
+    echo "WARNING: Alpine kernel not found in rootfs, downloading directly..."
+    echo "This fallback method downloads a compatible Alpine kernel"
+    
+    mkdir -p kernel-download
+    cd kernel-download
+    
+    # Download Alpine kernel package for armhf
+    ALPINE_VERSION="${ALPINE_VERSION:-3.22}"
+    
+    echo "Downloading Alpine kernel package..."
+    if wget "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/main/armhf/APKINDEX.tar.gz" -O APKINDEX.tar.gz; then
+        # Extract package index
+        tar -xzf APKINDEX.tar.gz
+        
+        # Find kernel package
+        KERNEL_PKG=$(grep -A 5 "P:linux-rpi" APKINDEX | grep "V:" | head -1 | cut -d: -f2)
+        if [ -n "$KERNEL_PKG" ]; then
+            echo "Found Alpine kernel version: $KERNEL_PKG"
+            
+            # Download and extract kernel package
+            PKG_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/main/armhf/linux-rpi-${KERNEL_PKG}.apk"
+            echo "Downloading: $PKG_URL"
+            
+            if wget "$PKG_URL" -O kernel.apk; then
+                # Extract kernel from apk (it's just a tar.gz)
+                tar -xzf kernel.apk
+                
+                # Find kernel files
+                ALPINE_KERNEL=$(find . -name "vmlinuz-*" -type f | head -1)
+                ALPINE_INITRD=$(find . -name "initramfs-*" -type f | head -1)
+                
+                if [ -n "$ALPINE_KERNEL" ]; then
+                    # Convert to absolute path
+                    ALPINE_KERNEL=$(cd "$(dirname "$ALPINE_KERNEL")" && pwd)/$(basename "$ALPINE_KERNEL")
+                    echo "Downloaded Alpine kernel: $ALPINE_KERNEL"
+                fi
+                
+                if [ -n "$ALPINE_INITRD" ]; then
+                    ALPINE_INITRD=$(cd "$(dirname "$ALPINE_INITRD")" && pwd)/$(basename "$ALPINE_INITRD")
+                    echo "Downloaded Alpine initrd: $ALPINE_INITRD"
+                fi
+            fi
+        fi
+    fi
+    
+    cd ..
+fi
+
+# Verify we have a kernel
+if [ -z "$ALPINE_KERNEL" ] || [ ! -f "$ALPINE_KERNEL" ]; then
+    echo "FATAL ERROR: Could not find or download Alpine kernel"
+    echo "Attempted methods:"
+    echo "1. Looking in $ROOTFS_PATH/boot/ - failed"
+    echo "2. Extracting from chroot - failed"
+    echo "3. Direct download - failed"
+    echo ""
+    echo "Debug information:"
+    echo "ROOTFS_PATH: $ROOTFS_PATH"
+    echo "Rootfs exists: $([ -d "$ROOTFS_PATH" ] && echo 'YES' || echo 'NO')"
+    if [ -d "$ROOTFS_PATH" ]; then
+        echo "Rootfs structure:"
+        find "$ROOTFS_PATH" -maxdepth 2 -type d | head -20
+        echo ""
+        echo "Looking for any kernel-like files:"
+        find "$ROOTFS_PATH" -name "*vmlinuz*" -o -name "*kernel*" -o -name "*bzImage*" 2>/dev/null | head -10
+    fi
     exit 1
 fi
 
-echo "Found Alpine kernel: $ALPINE_KERNEL"
-echo "Found Alpine initrd: $ALPINE_INITRD"
-echo "Found Alpine modules: $ALPINE_MODULES"
+# Find modules directory
+if [ -d "$ROOTFS_PATH/lib/modules" ]; then
+    ALPINE_MODULES=$(find "$ROOTFS_PATH/lib/modules" -maxdepth 1 -mindepth 1 -type d | head -1)
+fi
+
+echo "✅ Alpine kernel components found:"
+echo "  Kernel: $ALPINE_KERNEL"
+echo "  Initrd: $ALPINE_INITRD"
+echo "  Modules: $ALPINE_MODULES"
 
 # Extract kernel version from path
-KERNEL_VERSION=$(basename "$ALPINE_MODULES")
+if [ -n "$ALPINE_MODULES" ]; then
+    KERNEL_VERSION=$(basename "$ALPINE_MODULES")
+else
+    # Extract from kernel filename
+    KERNEL_VERSION=$(basename "$ALPINE_KERNEL" | sed 's/vmlinuz-//')
+fi
 echo "Alpine kernel version: $KERNEL_VERSION"
 
 # Install MINIMAL Pi firmware (just enough to boot Alpine kernel)
@@ -136,14 +248,16 @@ mkdir -p firmware-temp
 cd firmware-temp
 
 # Download ONLY essential Pi firmware files (not kernel!)
-wget -q https://github.com/raspberrypi/firmware/raw/master/boot/bootcode.bin || echo "bootcode.bin download failed"
+echo "Downloading minimal Pi firmware..."
+wget -q https://github.com/raspberrypi/firmware/raw/master/boot/bootcode.bin || echo "bootcode.bin download failed (may not be needed on Pi 4+)"
 wget -q https://github.com/raspberrypi/firmware/raw/master/boot/start.elf || echo "start.elf download failed"
 wget -q https://github.com/raspberrypi/firmware/raw/master/boot/start4.elf || echo "start4.elf download failed"
 wget -q https://github.com/raspberrypi/firmware/raw/master/boot/fixup.dat || echo "fixup.dat download failed"
 wget -q https://github.com/raspberrypi/firmware/raw/master/boot/fixup4.dat || echo "fixup4.dat download failed"
 
 # Copy only essential firmware (NO Pi kernels!)
-cp bootcode.bin ../mnt/boot/ 2>/dev/null || echo "bootcode.bin not available"
+echo "Installing firmware files..."
+cp bootcode.bin ../mnt/boot/ 2>/dev/null || echo "bootcode.bin not available (normal for Pi 4+)"
 cp start*.elf ../mnt/boot/ 2>/dev/null || echo "start.elf files not available"
 cp fixup*.dat ../mnt/boot/ 2>/dev/null || echo "fixup.dat files not available"
 
@@ -155,12 +269,18 @@ echo "Installing Alpine kernel as primary boot kernel..."
 cp "$ALPINE_KERNEL" mnt/boot/kernel.img
 cp "$ALPINE_KERNEL" mnt/boot/kernel7.img  # For Pi 2/3
 cp "$ALPINE_KERNEL" mnt/boot/kernel7l.img # For Pi 4
+cp "$ALPINE_KERNEL" mnt/boot/kernel8.img  # For Pi 3/4 64-bit mode
 
-if [ -n "$ALPINE_INITRD" ]; then
+if [ -n "$ALPINE_INITRD" ] && [ -f "$ALPINE_INITRD" ]; then
     echo "Installing Alpine initrd..."
     cp "$ALPINE_INITRD" mnt/boot/initrd.img
     cp "$ALPINE_INITRD" mnt/boot/initrd7.img
     cp "$ALPINE_INITRD" mnt/boot/initrd7l.img
+    cp "$ALPINE_INITRD" mnt/boot/initrd8.img
+    INITRD_CMDLINE="initrd=initrd.img"
+else
+    echo "No initrd found - booting without initrd"
+    INITRD_CMDLINE=""
 fi
 
 # Create PURE ALPINE config.txt
@@ -216,7 +336,7 @@ EOF
 # Create Alpine-optimized cmdline.txt
 echo "Creating Alpine-optimized cmdline.txt..."
 cat > mnt/boot/cmdline.txt << EOF
-console=serial0,115200 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 elevator=deadline fsck.repair=yes rootwait quiet modules-load=brcmfmac,brcmutil,cfg80211
+console=serial0,115200 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 elevator=deadline fsck.repair=yes rootwait quiet modules-load=brcmfmac,brcmutil,cfg80211 ${INITRD_CMDLINE}
 EOF
 
 # Create A/B state file (start with slot A)
@@ -225,11 +345,14 @@ echo "A" > mnt/boot/ab_state
 # Install Pi-Star system to BOTH partitions
 echo "Installing Pi-Star system to slot A..."
 if [ -f "/tmp/pi-star-build/rootfs.tar.gz" ]; then
+    echo "Installing from rootfs.tar.gz..."
     tar -xzf "/tmp/pi-star-build/rootfs.tar.gz" -C mnt/root-a/
 elif [ -d "/tmp/pi-star-build/rootfs" ]; then
+    echo "Installing from rootfs directory..."
     cp -a /tmp/pi-star-build/rootfs/* mnt/root-a/
 else
-    echo "Error: No Pi-Star rootfs found. Run build-rootfs.sh first."
+    echo "Error: No Pi-Star rootfs found. Available files:"
+    ls -la /tmp/pi-star-build/ 2>/dev/null || echo "Build directory not found"
     exit 1
 fi
 
