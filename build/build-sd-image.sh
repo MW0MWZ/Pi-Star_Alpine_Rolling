@@ -162,17 +162,96 @@ fi
 
 echo "🔄 Setting up A/B kernel structure..."
 
+# Debug: Show what we actually have in boot
+echo "🔍 Debugging: Boot partition contents:"
+ls -la mnt/boot/ | head -20
+
 # Create directories for A/B kernel storage
 mkdir -p mnt/boot/kernelA
 mkdir -p mnt/boot/kernelB
 
-# Copy kernels to A/B directories (initially both are the same)
+# Look for kernel files and copy them to A/B directories
+KERNEL_FILES_FOUND=0
+
+# Check for kernel files in boot directory
 if ls mnt/boot/kernel*.img >/dev/null 2>&1; then
+    echo "✅ Found kernel files in boot directory"
     cp mnt/boot/kernel*.img mnt/boot/kernelA/
     cp mnt/boot/kernel*.img mnt/boot/kernelB/
-    echo "✅ Created A/B kernel directories"
+    KERNEL_FILES_FOUND=1
+    echo "✅ Created A/B kernel directories with $(ls mnt/boot/kernel*.img | wc -l) kernels"
 else
-    echo "❌ No kernel files found"
+    echo "⚠️  No kernel*.img files found in boot directory"
+    
+    # Check if we have any kernel-like files
+    echo "🔍 Looking for any kernel-related files..."
+    find mnt/boot/ -name "*kernel*" -o -name "*vmlinuz*" -o -name "*zImage*" | head -10
+    
+    # Check the exported kernel files from rootfs build
+    if [ -f "$KERNEL_FILES_PATH/kernel_source.txt" ]; then
+        KERNEL_SOURCE=$(cat "$KERNEL_FILES_PATH/kernel_source.txt")
+        echo "📋 Kernel source from build: $KERNEL_SOURCE"
+        
+        if [ -d "$KERNEL_FILES_PATH" ]; then
+            echo "🔍 Available kernel files from rootfs build:"
+            ls -la "$KERNEL_FILES_PATH/"
+            
+            # Try to copy from kernel files directory
+            if ls "$KERNEL_FILES_PATH"/kernel*.img >/dev/null 2>&1; then
+                echo "🔄 Copying kernels from kernel files directory..."
+                cp "$KERNEL_FILES_PATH"/kernel*.img mnt/boot/
+                cp "$KERNEL_FILES_PATH"/kernel*.img mnt/boot/kernelA/
+                cp "$KERNEL_FILES_PATH"/kernel*.img mnt/boot/kernelB/
+                KERNEL_FILES_FOUND=1
+                echo "✅ Kernels copied from kernel files directory"
+            elif ls "$KERNEL_FILES_PATH"/vmlinuz* >/dev/null 2>&1; then
+                echo "🔄 Converting vmlinuz to kernel.img format..."
+                for vmlinuz in "$KERNEL_FILES_PATH"/vmlinuz*; do
+                    kernel_name=$(basename "$vmlinuz" | sed 's/vmlinuz/kernel/').img
+                    cp "$vmlinuz" "mnt/boot/$kernel_name"
+                done
+                cp mnt/boot/kernel*.img mnt/boot/kernelA/
+                cp mnt/boot/kernel*.img mnt/boot/kernelB/
+                KERNEL_FILES_FOUND=1
+                echo "✅ Converted vmlinuz files to kernel.img format"
+            fi
+        fi
+    fi
+fi
+
+# If still no kernels found, try to download a minimal kernel
+if [ "$KERNEL_FILES_FOUND" -eq 0 ]; then
+    echo "⚠️  No kernels found - attempting to download minimal Raspbian kernel..."
+    
+    # Download a single kernel file for emergency boot
+    EMERGENCY_KERNEL_URL="https://github.com/raspberrypi/firmware/raw/master/boot/kernel8.img"
+    
+    if wget -q "$EMERGENCY_KERNEL_URL" -O mnt/boot/kernel8.img; then
+        echo "📥 Downloaded emergency kernel8.img"
+        
+        # Create basic kernel set
+        cp mnt/boot/kernel8.img mnt/boot/kernel.img
+        cp mnt/boot/kernel8.img mnt/boot/kernel7.img
+        cp mnt/boot/kernel8.img mnt/boot/kernel7l.img
+        
+        # Copy to A/B directories
+        cp mnt/boot/kernel*.img mnt/boot/kernelA/
+        cp mnt/boot/kernel*.img mnt/boot/kernelB/
+        
+        KERNEL_FILES_FOUND=1
+        echo "✅ Emergency kernel setup complete"
+        echo "⚠️  WARNING: Using emergency kernel - modules may not match"
+    else
+        echo "❌ Failed to download emergency kernel"
+    fi
+fi
+
+if [ "$KERNEL_FILES_FOUND" -eq 0 ]; then
+    echo "❌ FATAL: No kernel files found and unable to download emergency kernel"
+    echo "🔍 Debug info:"
+    echo "   • Rootfs path: $ROOTFS_PATH"
+    echo "   • Kernel files path: $KERNEL_FILES_PATH"
+    echo "   • Boot contents: $(ls mnt/boot/ | tr '\n' ' ')"
     exit 1
 fi
 
