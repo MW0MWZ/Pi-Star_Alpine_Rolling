@@ -146,11 +146,17 @@ jobs:
               --exclude="./var/cache/*" \
               --owner=0 --group=0 .
           
-          # Sign if possible
+          # Sign if possible - FIXED PATH
           if [ -f "${GITHUB_WORKSPACE}/keys/private.pem" ]; then
+              echo "Signing package..."
               openssl dgst -sha256 -sign "${GITHUB_WORKSPACE}/keys/private.pem" \
                   -out "${OUTPUT_DIR}/pi-star-${VERSION}.tar.gz.sig" \
                   "${OUTPUT_DIR}/pi-star-${VERSION}.tar.gz"
+              echo "Package signed successfully"
+          else
+              echo "Warning: Private key not found at ${GITHUB_WORKSPACE}/keys/private.pem - package will not be signed"
+              echo "Available files in keys directory:"
+              ls -la "${GITHUB_WORKSPACE}/keys/" 2>/dev/null || echo "Keys directory not found"
           fi
           
           echo "Package created: pi-star-${VERSION}.tar.gz"
