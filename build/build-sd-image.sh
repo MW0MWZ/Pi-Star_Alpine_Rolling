@@ -209,47 +209,118 @@ fi
 echo "$VERSION" > mnt/root-a/etc/pi-star-version
 echo "$VERSION" > mnt/root-b/etc/pi-star-version
 
-# Create first-boot setup script
+# Create first-boot setup script (updated version for build-sd-image.sh)
 cat > mnt/root-a/usr/local/bin/first-boot-setup << 'EOF'
 #!/bin/bash
-# First boot setup for Pi-Star A/B system
+# Enhanced first boot setup for Pi-Star A/B system
 
 echo "Pi-Star First Boot Setup"
 echo "======================="
 
-# Check if running interactively
-if [ -t 0 ]; then
-    echo ""
-    echo "Default login credentials:"
-    echo "  Username: pi-star"
-    echo "  Password: pi-star"
-    echo ""
-    echo "  Root password: pistar"
-    echo ""
-    echo "SECURITY WARNING: Please change these default passwords!"
-    echo ""
+# Check if boot configuration was processed
+if [ -f "/boot/.config-processed" ]; then
+    echo "✅ Boot configuration was processed from /boot/pistar-config.txt"
+    echo "   User account and system settings configured automatically"
+    echo "   No manual setup required"
+else
+    echo "ℹ️  No boot configuration found - manual setup required"
     
-    # Offer to change passwords
-    read -p "Would you like to change the pi-star password now? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        passwd pi-star
-    fi
-    
-    read -p "Would you like to change the root password now? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        passwd root
+    # Check if running interactively
+    if [ -t 0 ]; then
+        echo ""
+        echo "SECURITY NOTICE:"
+        echo "================"
+        echo "• Root account: DISABLED (no password, no SSH access)"
+        echo "• pi-star user: Passwordless sudo enabled"
+        echo "• SSH: Key authentication only (no password auth)"
+        echo ""
+        echo "You MUST set a password for pi-star user OR configure SSH keys"
+        echo "to access this system remotely."
+        echo ""
+        
+        # Offer to change pi-star password
+        read -p "Set a password for pi-star user? (y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            passwd pi-star
+            
+            # Ask about SSH password authentication
+            read -p "Enable SSH password authentication? (y/N): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                echo "Enabling SSH password authentication..."
+                sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+                sed -i 's/#PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+                systemctl restart sshd || service sshd restart
+            fi
+        else
+            echo ""
+            echo "⚠️  WARNING: No password set for pi-star user!"
+            echo "   You must configure SSH keys or connect via console to access this system."
+            echo ""
+            echo "To set up SSH key access:"
+            echo "1. Copy your SSH public key to: /home/pi-star/.ssh/authorized_keys"
+            echo "2. Or create /boot/pistar-config.txt with ssh_key= setting"
+        fi
+        
+        # Network configuration help
+        echo ""
+        echo "NETWORK CONFIGURATION:"
+        echo "====================="
+        if command -v iwconfig >/dev/null 2>&1; then
+            echo "WiFi interface available. To configure WiFi:"
+            echo "1. Create /boot/pistar-config.txt with WiFi settings"
+            echo "2. Or use 'sudo wpa_passphrase SSID PASSWORD >> /etc/wpa_supplicant/wpa_supplicant.conf'"
+        fi
+        if ip link show eth0 >/dev/null 2>&1; then
+            echo "Ethernet interface available - DHCP configured automatically"
+        fi
+    else
+        echo "Running non-interactively - no password prompts"
+        echo "Configure via /boot/pistar-config.txt or SSH keys"
     fi
 fi
 
 # Mark A/B boot slot as successful
-/usr/local/bin/boot-manager success A
+if [ -f "/usr/local/bin/boot-validator" ]; then
+    /usr/local/bin/boot-validator
+fi
 
 # Mark first boot complete
 touch /opt/pistar/.first-boot-complete
 
+echo ""
 echo "Pi-Star A/B system first boot complete"
+echo "======================================"
+
+# Show system status
+echo ""
+echo "SYSTEM STATUS:"
+echo "• Hostname: $(hostname)"
+echo "• Active partition: $(cat /boot/ab_state 2>/dev/null || echo 'Unknown')"
+echo "• Pi-Star version: $(cat /etc/pi-star-version 2>/dev/null || echo 'Unknown')"
+
+# Show network status
+if command -v ip >/dev/null 2>&1; then
+    echo "• Network interfaces:"
+    ip addr show | grep "inet " | grep -v "127.0.0.1" | while read line; do
+        echo "  $line"
+    done
+fi
+
+# Show SSH status
+if [ -f "/etc/ssh/sshd_config" ]; then
+    if grep -q "PasswordAuthentication yes" /etc/ssh/sshd_config; then
+        echo "• SSH: Password authentication ENABLED"
+    else
+        echo "• SSH: Key authentication only"
+    fi
+fi
+
+echo ""
+echo "For support and documentation:"
+echo "• Repository: https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling"
+echo "• Update server: https://version.pistar.uk"
 EOF
 
 chmod +x mnt/root-a/usr/local/bin/first-boot-setup

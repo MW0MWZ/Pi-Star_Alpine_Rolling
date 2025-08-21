@@ -133,15 +133,18 @@ rc-update add sshd default
 rc-update add chronyd default
 CHROOT_SERVICES
 
-# Create user accounts with secure defaults
-echo "Creating user accounts with secure configuration..."
+# Create user accounts with enhanced security (replace existing section in build-rootfs.sh)
+echo "Creating secure user accounts..."
 sudo chroot . /bin/sh << 'CHROOT_USERS'
-# Disable root password completely
+# Install sudo package
+apk add --no-cache sudo
+
+# Lock root account completely (no password, no SSH access)
 passwd -l root
 
-# Create pi-star user with no initial password (will be set from config)
+# Create pi-star user with no initial password
 adduser -D -s /bin/bash pi-star
-passwd -u pi-star  # Unlock account but no password set
+# Don't set any password initially - will be configured via boot config or remain locked
 
 # Add pi-star to essential groups
 addgroup sudo 2>/dev/null || true
@@ -149,7 +152,8 @@ adduser pi-star sudo
 adduser pi-star dialout  # Serial port access
 adduser pi-star audio    # Audio access
 adduser pi-star video    # Video/GPIO access
-adduser pi-star gpio 2>/dev/null || true  # GPIO access
+adduser pi-star gpio 2>/dev/null || true     # GPIO access
+adduser pi-star netdev 2>/dev/null || true   # Network device access
 
 # Create pi-star home directory structure
 mkdir -p /home/pi-star/.ssh
@@ -161,40 +165,19 @@ chmod 700 /home/pi-star/.ssh
 echo "pi-star ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/pi-star
 chmod 440 /etc/sudoers.d/pi-star
 
-# Disable SSH root login and password auth by default
-cat > /etc/ssh/sshd_config << 'EOF'
-# Pi-Star SSH Configuration - Security Hardened
-Port 22
-Protocol 2
-
-# Security settings - no root login, no password auth by default
-PermitRootLogin no
-PasswordAuthentication no
-PubkeyAuthentication yes
-AuthorizedKeysFile .ssh/authorized_keys
-
-# Will be enabled if password set in boot config
-#PasswordAuthentication yes
-
-# Disable dangerous features
-PermitEmptyPasswords no
-X11Forwarding no
-AllowTcpForwarding no
-
-# Connection settings
-ClientAliveInterval 300
-ClientAliveCountMax 2
-MaxAuthTries 3
-MaxSessions 2
-
-# Logging
-SyslogFacility AUTH
-LogLevel INFO
-EOF
+# Install WiFi and networking packages
+echo "Installing WiFi and networking support..."
+apk add --no-cache \
+    wpa_supplicant \
+    wireless-tools \
+    iw \
+    dhcpcd \
+    bridge-utils
 
 echo "Secure user configuration complete:"
-echo "  root: disabled (no password, no SSH access)"
-echo "  pi-star: passwordless sudo, SSH key auth only (until boot config processed)"
+echo "  root: LOCKED (no password, no SSH access)"
+echo "  pi-star: passwordless sudo, WiFi support"
+echo "  Configuration via /boot/pistar-config.txt"
 CHROOT_USERS
 
 # Install Pi-Star (placeholder or actual)
@@ -326,6 +309,52 @@ depend() {
     before networking
 }
 SERVICE_EOF
+
+# Create enhanced boot config service
+sudo tee etc/init.d/pistar-boot-config << 'SERVICE_EOF'
+#!/sbin/openrc-run
+
+name="Pi-Star Boot Config"
+description="Process boot partition configuration before network startup"
+command="/usr/local/bin/process-boot-config"
+
+depend() {
+    after localmount
+    before networking
+    before wpa_supplicant
+    before dhcpcd
+}
+
+start() {
+    ebegin "Processing Pi-Star boot configuration"
+    $command
+    eend $?
+}
+SERVICE_EOF
+
+sudo chmod +x etc/init.d/pistar-boot-config
+
+# Enable services in correct order
+echo "Configuring services..."
+sudo chroot . /bin/sh << 'CHROOT_SERVICES'
+# Boot services
+rc-update add bootmisc boot
+rc-update add hostname boot
+rc-update add modules boot
+rc-update add devfs sysinit
+rc-update add pistar-boot-config boot
+
+# Default services  
+rc-update add dbus default
+rc-update add sshd default
+rc-update add chronyd default
+rc-update add networking default
+rc-update add wpa_supplicant default
+rc-update add dhcpcd default
+rc-update add first-boot default
+
+echo "Services configured with proper dependencies"
+CHROOT_SERVICES
 
 sudo chmod +x etc/init.d/pistar-boot-config
 sudo chroot . rc-update add pistar-boot-config boot
