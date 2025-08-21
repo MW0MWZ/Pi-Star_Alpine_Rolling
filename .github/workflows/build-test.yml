@@ -254,7 +254,7 @@ jobs:
           echo "🧪 **For development and testing only**" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📥 Download:" >> $GITHUB_STEP_SUMMARY
-          echo "Download artifacts from the **Artifacts** section above to test locally." >> $GITHUB_STEP_SUMMARY
+          echo "Download artifacts from the **Artifacts** section below to test locally." >> $GITHUB_STEP_SUMMARY
           
           # Show file sizes
           echo "" >> $GITHUB_STEP_SUMMARY
