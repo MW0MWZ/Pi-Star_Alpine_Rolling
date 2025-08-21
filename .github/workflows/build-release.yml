@@ -233,20 +233,79 @@ jobs:
             - Build Date: $(date -u +%Y-%m-%d)
             
             **Files:**
-            - `pi-star-${{ steps.version.outputs.VERSION }}.tar.gz` - Update package
-            - `pi-star-${{ steps.version.outputs.VERSION }}.tar.gz.sig` - Digital signature
-            - `release-info.json` - Build metadata
+            - `pi-star-${{ steps.version.outputs.VERSION }}.tar.gz` - Update package for existing installations (OTA)
+            - `pi-star-${{ steps.version.outputs.VERSION }}.img.gz` - Complete SD card image for new installations
+            - `pi-star-${{ steps.version.outputs.VERSION }}.tar.gz.sig` - Digital signature for update package
+            - `release-info.json` - Build metadata and checksums
             
             **Installation:**
-            This update package is designed for the Pi-Star A/B partition OTA system.
-            Devices will automatically download and install this update.
+            
+            *For new installations:*
+            ```bash
+            # Download and flash SD card image (4GB+ SD card required)
+            wget https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.VERSION }}/pi-star-${{ steps.version.outputs.VERSION }}.img.gz
+            gunzip -c pi-star-${{ steps.version.outputs.VERSION }}.img.gz | sudo dd of=/dev/sdX bs=4M status=progress
+            ```
+            
+            *For existing Pi-Star installations:*
+            
+            This update package is designed for the Pi-Star A/B partition OTA system. Devices will automatically download and install this update, or you can install manually:
+            
+            ```bash
+            # Manual OTA update installation
+            wget https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.VERSION }}/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz
+            sudo /usr/local/bin/install-update pi-star-${{ steps.version.outputs.VERSION }}.tar.gz ${{ steps.version.outputs.VERSION }}
+            ```
             
             **Verification:**
-            \`\`\`bash
-            openssl dgst -sha256 -verify public-key.pem \\
-              -signature pi-star-${{ steps.version.outputs.VERSION }}.tar.gz.sig \\
+            
+            All packages are cryptographically signed. To verify integrity:
+            
+            ```bash
+            # Download the files
+            wget https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.VERSION }}/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz
+            wget https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.VERSION }}/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz.sig
+            
+            # Get the public key from the repository
+            wget https://raw.githubusercontent.com/${{ github.repository }}/main/keys/public.pem
+            
+            # Verify the signature
+            openssl dgst -sha256 -verify public.pem \
+              -signature pi-star-${{ steps.version.outputs.VERSION }}.tar.gz.sig \
               pi-star-${{ steps.version.outputs.VERSION }}.tar.gz
-            \`\`\`
+            ```
+            
+            **First Boot Configuration:**
+            
+            For new SD card installations, you can configure the system by creating `/boot/pistar-config.txt` on the SD card before first boot:
+            
+            ```ini
+            # Essential Configuration
+            wifi_ssid=YourWiFiNetwork
+            wifi_password=YourWiFiPassword
+            user_password=YourSecurePassword
+            
+            # Optional Settings
+            hostname=pi-star
+            timezone=Europe/London
+            ssh_key=ssh-rsa AAAAB3NzaC1yc2EAAAA... your-email@example.com
+            
+            # Pi-Star Settings
+            callsign=M0ABC
+            dmr_id=1234567
+            ```
+            
+            **Security Notes:**
+            - Default SSH access requires key authentication (no passwords)
+            - Root account is disabled by default
+            - User `pi-star` has passwordless sudo access
+            - Configure passwords and SSH keys via boot configuration file
+            
+            ---
+            
+            📡 **Update Server:** https://mw0mwz.github.io/Pi-Star_Alpine_Rolling/
+            
+            🔧 **Repository:** https://github.com/${{ github.repository }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
