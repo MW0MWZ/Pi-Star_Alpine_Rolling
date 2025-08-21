@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1-alpha12",
+  "build_date": "2025-08-21T09:33:06Z",
+  "commit": "8bd5de1c8754db0ef7964a60fb733356bebd451d",
+  "pi_star_mode": "placeholder",
+  "architecture": "armhf",
+  "alpine_version": "3.22",
+  "files": {
+    "update": "pi-star-0.0.1-alpha12.tar.gz",
+    "signature": "pi-star-0.0.1-alpha12.tar.gz.sig",
+    "checksum": "3f41185dd1de74c1c1e851b2e89d3e4bf046be6814733c4cc41687312980c375"
+  }
+}

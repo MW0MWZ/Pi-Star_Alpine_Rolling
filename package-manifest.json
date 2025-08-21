@@ -1,0 +1,24 @@
+{
+    "package": {
+        "name": "pi-star-0.0.1-alpha12.tar.gz",
+        "version": "0.0.1-alpha12",
+        "created": "2025-08-21T09:33:05Z",
+        "size": 61002237,
+        "sha256": "3f41185dd1de74c1c1e851b2e89d3e4bf046be6814733c4cc41687312980c375",
+        "md5": "51646745fd0a87a9bb3d94b9f334b780"
+    },
+    "signature": {
+        "file": "pi-star-0.0.1-alpha12.tar.gz.sig",
+        "algorithm": "SHA256withRSA",
+        "created": "2025-08-21T09:33:05Z",
+        "present": true
+    },
+    "build": {
+        "rootfs_source": "/tmp/pi-star-build/rootfs",
+        "build_host": "pkrvmqc4gcfdwos",
+        "build_user": "root",
+        "git_commit": "8bd5de1c8754db0ef7964a60fb733356bebd451d",
+        "alpine_version": "3.22",
+        "architecture": "armhf"
+    }
+}
