@@ -22,7 +22,7 @@ on:
 
 env:
   BUILD_ARCH: armhf
-  ALPINE_VERSION: 3.22  # Updated to current stable version
+  ALPINE_VERSION: 3.22
 
 jobs:
   build:
@@ -38,15 +38,17 @@ jobs:
 
       - name: Set up build environment
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          echo "🔧 Setting up build environment..."
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
             qemu-user-static \
             debootstrap \
             binfmt-support \
             openssl \
             curl \
             wget \
-            rsync
+            rsync > /dev/null 2>&1
+          echo "✅ Build environment ready"
 
       - name: Set version
         id: version
@@ -57,48 +59,49 @@ jobs:
             VERSION="${GITHUB_REF_NAME#v}"
           fi
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "Building version: $VERSION"
+          echo "🏷️ Building version: $VERSION"
 
       - name: Cache Alpine rootfs
         uses: actions/cache@v4
         with:
           path: /tmp/alpine-cache
-          key: alpine-${{ env.ALPINE_VERSION }}-${{ env.BUILD_ARCH }}-v3  # Updated cache version
+          key: alpine-${{ env.ALPINE_VERSION }}-${{ env.BUILD_ARCH }}-v3
 
       - name: Download Alpine mini rootfs
         run: |
+          echo "📦 Downloading Alpine ${{ env.ALPINE_VERSION }} rootfs..."
           mkdir -p /tmp/alpine-cache
           if [ ! -f /tmp/alpine-cache/alpine-minirootfs.tar.gz ]; then
-            # Updated download URL for Alpine 3.22 armhf
-            wget -O /tmp/alpine-cache/alpine-minirootfs.tar.gz \
-              "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/releases/${{ env.BUILD_ARCH }}/alpine-minirootfs-${{ env.ALPINE_VERSION }}.0-${{ env.BUILD_ARCH }}.tar.gz"
-            
-            # Verify download was successful
-            if [ ! -s /tmp/alpine-cache/alpine-minirootfs.tar.gz ]; then
-              echo "Failed to download Alpine rootfs, trying alternative URL..."
-              rm -f /tmp/alpine-cache/alpine-minirootfs.tar.gz
-              wget -O /tmp/alpine-cache/alpine-minirootfs.tar.gz \
+            # Try primary URL
+            if ! wget -q -O /tmp/alpine-cache/alpine-minirootfs.tar.gz \
+              "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/releases/${{ env.BUILD_ARCH }}/alpine-minirootfs-${{ env.ALPINE_VERSION }}.0-${{ env.BUILD_ARCH }}.tar.gz"; then
+              echo "🔄 Trying alternative URL..."
+              wget -q -O /tmp/alpine-cache/alpine-minirootfs.tar.gz \
                 "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/releases/${{ env.BUILD_ARCH }}/alpine-minirootfs-${{ env.ALPINE_VERSION }}.1-${{ env.BUILD_ARCH }}.tar.gz"
             fi
             
-            # Final verification
             if [ ! -s /tmp/alpine-cache/alpine-minirootfs.tar.gz ]; then
-              echo "ERROR: Failed to download Alpine mini rootfs"
+              echo "❌ Failed to download Alpine rootfs"
               exit 1
             fi
             
-            echo "Downloaded Alpine rootfs size: $(ls -lh /tmp/alpine-cache/alpine-minirootfs.tar.gz)"
+            echo "✅ Downloaded $(ls -lh /tmp/alpine-cache/alpine-minirootfs.tar.gz | awk '{print $5}')"
+          else
+            echo "✅ Using cached Alpine rootfs"
           fi
 
       - name: Prepare signing keys
         run: |
+          echo "🔐 Preparing signing keys..."
           mkdir -p keys
           echo "${{ secrets.UPDATE_PRIVATE_KEY }}" > keys/private.pem
           echo "${{ secrets.UPDATE_PUBLIC_KEY }}" > keys/public.pem
           chmod 600 keys/private.pem
+          echo "✅ Signing keys ready"
 
       - name: Build root filesystem
         run: |
+          echo "🏗️ Building Pi-Star rootfs..."
           sudo chmod +x build/*.sh
           sudo -E ./build/build-rootfs.sh "${{ steps.version.outputs.VERSION }}" "${{ github.event.inputs.pi_star_mode || 'placeholder' }}"
         env:
@@ -109,7 +112,9 @@ jobs:
 
       - name: Build SD card image
         run: |
+          echo "💾 Building SD card image..."
           sudo -E ./build/build-sd-image.sh "${{ steps.version.outputs.VERSION }}" "pi-star-${{ steps.version.outputs.VERSION }}.img"
+          echo "✅ SD image created: $(ls -lh /tmp/pi-star-image-build/pi-star-${{ steps.version.outputs.VERSION }}.img.gz | awk '{print $5}')"
         env:
           BUILD_DIR: /tmp/pi-star-image-build
           GITHUB_WORKSPACE: ${{ github.workspace }}
@@ -117,6 +122,7 @@ jobs:
       - name: Create package-update.sh if missing
         run: |
           if [ ! -f "build/package-update.sh" ]; then
+            echo "📝 Creating package-update.sh script..."
             mkdir -p build
             cat > build/package-update.sh << 'EOF'
           #!/bin/bash
@@ -131,12 +137,10 @@ jobs:
               exit 1
           fi
           
-          echo "Packaging Pi-Star update v${VERSION}..."
+          echo "📦 Packaging Pi-Star update v${VERSION}..."
           
-          # Create output directory
           mkdir -p "$OUTPUT_DIR"
           
-          # Create the package
           cd "$ROOTFS_DIR"
           tar -czf "${OUTPUT_DIR}/pi-star-${VERSION}.tar.gz" \
               --exclude="./proc/*" \
@@ -146,26 +150,27 @@ jobs:
               --exclude="./var/cache/*" \
               --owner=0 --group=0 .
           
-          # Sign if possible - FIXED PATH
           if [ -f "${GITHUB_WORKSPACE}/keys/private.pem" ]; then
-              echo "Signing package..."
+              echo "🔐 Signing package..."
               openssl dgst -sha256 -sign "${GITHUB_WORKSPACE}/keys/private.pem" \
                   -out "${OUTPUT_DIR}/pi-star-${VERSION}.tar.gz.sig" \
                   "${OUTPUT_DIR}/pi-star-${VERSION}.tar.gz"
-              echo "Package signed successfully"
+              echo "✅ Package signed"
           else
-              echo "Warning: Private key not found at ${GITHUB_WORKSPACE}/keys/private.pem - package will not be signed"
-              echo "Available files in keys directory:"
-              ls -la "${GITHUB_WORKSPACE}/keys/" 2>/dev/null || echo "Keys directory not found"
+              echo "⚠️  No private key - package will not be signed"
           fi
           
-          echo "Package created: pi-star-${VERSION}.tar.gz"
+          echo "✅ Package created: pi-star-${VERSION}.tar.gz"
           EOF
             chmod +x build/package-update.sh
+            echo "✅ Package script created"
+          else
+            echo "✅ Using existing package-update.sh"
           fi
 
       - name: Package and sign update
         run: |
+          echo "📦 Creating update package..."
           sudo -E ./build/package-update.sh \
             "${{ steps.version.outputs.VERSION }}" \
             "/tmp/pi-star-build/rootfs" \
@@ -173,17 +178,19 @@ jobs:
 
       - name: Generate update metadata
         run: |
-          # Ensure output directory exists and is writable
+          echo "📋 Generating release metadata..."
           mkdir -p output
           sudo chown -R $USER:$USER output
           sudo chmod -R 755 output
           
-          # Verify the package file exists
           if [ ! -f "output/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz" ]; then
-            echo "Error: Package file not found"
+            echo "❌ Package file not found"
             ls -la output/
             exit 1
           fi
+          
+          PACKAGE_SIZE=$(stat -c%s "output/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz")
+          CHECKSUM=$(sha256sum "output/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz" | cut -d' ' -f1)
           
           cat > output/release-info.json << EOF
           {
@@ -196,13 +203,14 @@ jobs:
             "files": {
               "update": "pi-star-${{ steps.version.outputs.VERSION }}.tar.gz",
               "signature": "pi-star-${{ steps.version.outputs.VERSION }}.tar.gz.sig",
-              "checksum": "$(sha256sum output/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz | cut -d' ' -f1)"
-            }
+              "checksum": "$CHECKSUM"
+            },
+            "package_size": $PACKAGE_SIZE
           }
           EOF
           
-          echo "Generated release-info.json:"
-          cat output/release-info.json
+          echo "✅ Release metadata generated"
+          echo "📊 Package size: $(numfmt --to=iec-i --suffix=B $PACKAGE_SIZE)"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -218,7 +226,6 @@ jobs:
         run: |
           BUILD_DATE=$(date -u +%Y-%m-%d)
           echo "DATE=$BUILD_DATE" >> $GITHUB_OUTPUT
-          echo "Build date: $BUILD_DATE"
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -319,28 +326,30 @@ jobs:
       - name: Update GitHub Pages
         if: startsWith(github.ref, 'refs/tags/')
         run: |
-          # Prepare update server files
+          echo "🌐 Preparing GitHub Pages update..."
           mkdir -p pages
           cp output/* pages/
           
-          # Copy server files if they exist
           if [ -d "server" ]; then
             cp server/* pages/
           fi
           
-          # Generate latest.json for update API
+          CHECKSUM=$(sha256sum "output/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz" | cut -d' ' -f1)
+          
           cat > pages/latest.json << EOF
           {
             "latest_version": "${{ steps.version.outputs.VERSION }}",
             "download_url": "https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.VERSION }}/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz",
             "signature_url": "https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.VERSION }}/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz.sig",
-            "checksum": "$(sha256sum output/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz | cut -d' ' -f1)",
+            "checksum": "$CHECKSUM",
             "release_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "min_version": "2024.01.01",
             "alpine_version": "${{ env.ALPINE_VERSION }}",
             "architecture": "${{ env.BUILD_ARCH }}"
           }
           EOF
+          
+          echo "✅ GitHub Pages files prepared"
 
       - name: Deploy to GitHub Pages
         if: startsWith(github.ref, 'refs/tags/')
