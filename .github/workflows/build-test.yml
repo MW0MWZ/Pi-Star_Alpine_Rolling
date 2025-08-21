@@ -1,49 +1,258 @@
-name: Test Build
+name: Build Test Version
 
 on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'build/**'
+      - 'config/**'
+      - 'scripts/**'
+      - '.github/workflows/build-*.yml'
   pull_request:
     branches: [ main ]
   workflow_dispatch:
+    inputs:
+      test_version:
+        description: 'Test Version (e.g., test-2024.01.15-fix-wifi)'
+        required: false
+        type: string
+        default: ''
+      pi_star_mode:
+        description: 'Pi-Star Installation Mode'
+        required: true
+        type: choice
+        options:
+          - 'placeholder'
+          - 'docker'
+          - 'native'
+        default: 'placeholder'
+
+env:
+  BUILD_ARCH: armhf
+  ALPINE_VERSION: 3.22
 
 jobs:
-  test-build:
+  build-test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     
     steps:
-      - uses: actions/checkout@v4
-      
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Set up build environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-user-static debootstrap binfmt-support
+          sudo apt-get install -y \
+            qemu-user-static \
+            debootstrap \
+            binfmt-support \
+            openssl \
+            curl \
+            wget \
+            rsync
 
-      - name: Test rootfs build
+      - name: Set test version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.test_version }}" ]; then
+            VERSION="${{ github.event.inputs.test_version }}"
+          else
+            # Auto-generate test version based on timestamp and commit
+            TIMESTAMP=$(date +%Y.%m.%d-%H%M)
+            SHORT_SHA=${GITHUB_SHA:0:7}
+            VERSION="test-${TIMESTAMP}-${SHORT_SHA}"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building test version: $VERSION"
+
+      - name: Cache Alpine rootfs
+        uses: actions/cache@v4
+        with:
+          path: /tmp/alpine-cache
+          key: alpine-${{ env.ALPINE_VERSION }}-${{ env.BUILD_ARCH }}-v3
+
+      - name: Download Alpine mini rootfs
+        run: |
+          mkdir -p /tmp/alpine-cache
+          if [ ! -f /tmp/alpine-cache/alpine-minirootfs.tar.gz ]; then
+            wget -O /tmp/alpine-cache/alpine-minirootfs.tar.gz \
+              "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/releases/${{ env.BUILD_ARCH }}/alpine-minirootfs-${{ env.ALPINE_VERSION }}.0-${{ env.BUILD_ARCH }}.tar.gz"
+            
+            if [ ! -s /tmp/alpine-cache/alpine-minirootfs.tar.gz ]; then
+              echo "Failed to download Alpine rootfs, trying alternative URL..."
+              rm -f /tmp/alpine-cache/alpine-minirootfs.tar.gz
+              wget -O /tmp/alpine-cache/alpine-minirootfs.tar.gz \
+                "https://dl-cdn.alpinelinux.org/alpine/v${{ env.ALPINE_VERSION }}/releases/${{ env.BUILD_ARCH }}/alpine-minirootfs-${{ env.ALPINE_VERSION }}.1-${{ env.BUILD_ARCH }}.tar.gz"
+            fi
+            
+            if [ ! -s /tmp/alpine-cache/alpine-minirootfs.tar.gz ]; then
+              echo "ERROR: Failed to download Alpine mini rootfs"
+              exit 1
+            fi
+          fi
+
+      - name: Generate test signing keys
+        run: |
+          mkdir -p keys
+          # Generate temporary keys for test builds (not for production!)
+          openssl genpkey -algorithm RSA -out keys/private.pem -pkcs8 -pass pass:testkey123
+          openssl rsa -pubout -in keys/private.pem -out keys/public.pem -passin pass:testkey123
+          # Remove passphrase for build process
+          openssl rsa -in keys/private.pem -out keys/private.pem -passin pass:testkey123
+          chmod 600 keys/private.pem
+          
+          echo "⚠️  TEST KEYS GENERATED - NOT FOR PRODUCTION USE!"
+
+      - name: Build root filesystem
         run: |
           sudo chmod +x build/*.sh
-          sudo -E ./build/build-rootfs.sh "test-$(date +%s)" "placeholder"
+          sudo -E ./build/build-rootfs.sh "${{ steps.version.outputs.VERSION }}" "${{ github.event.inputs.pi_star_mode || 'placeholder' }}"
         env:
-          BUILD_DIR: /tmp/test-build
-          
+          BUILD_DIR: /tmp/pi-star-build
+          CACHE_DIR: /tmp/alpine-cache
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+          ALPINE_VERSION: ${{ env.ALPINE_VERSION }}
+
+      - name: Build SD card image
+        run: |
+          sudo -E ./build/build-sd-image.sh "${{ steps.version.outputs.VERSION }}" "pi-star-${{ steps.version.outputs.VERSION }}.img"
+        env:
+          BUILD_DIR: /tmp/pi-star-image-build
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+
+      - name: Package and sign test update
+        run: |
+          mkdir -p output
+          sudo chown -R $USER:$USER /tmp/pi-star-build/rootfs output
+          ./build/package-update.sh \
+            "${{ steps.version.outputs.VERSION }}" \
+            "/tmp/pi-star-build/rootfs" \
+            "output"
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
+
+      - name: Generate test metadata
+        run: |
+          cat > output/test-release-info.json << EOF
+          {
+            "version": "${{ steps.version.outputs.VERSION }}",
+            "build_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "commit": "${{ github.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "pi_star_mode": "${{ github.event.inputs.pi_star_mode || 'placeholder' }}",
+            "architecture": "${{ env.BUILD_ARCH }}",
+            "alpine_version": "${{ env.ALPINE_VERSION }}",
+            "build_type": "test",
+            "trigger": "${{ github.event_name }}",
+            "files": {
+              "update": "pi-star-${{ steps.version.outputs.VERSION }}.tar.gz",
+              "signature": "pi-star-${{ steps.version.outputs.VERSION }}.tar.gz.sig",
+              "image": "pi-star-${{ steps.version.outputs.VERSION }}.img.gz",
+              "checksum": "$(sha256sum output/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz | cut -d' ' -f1)"
+            },
+            "notes": {
+              "signing_key": "⚠️  Test key - NOT for production use!",
+              "update_server": "❌ Will NOT update production update server",
+              "purpose": "Development and testing only"
+            }
+          }
+          EOF
+
       - name: Validate build output
         run: |
-          if [ ! -d "/tmp/test-build/rootfs" ]; then
-            echo "Build failed - no rootfs directory"
+          echo "🔍 Validating test build..."
+          
+          # Check rootfs
+          if [ ! -d "/tmp/pi-star-build/rootfs" ]; then
+            echo "❌ Build failed - no rootfs directory"
             exit 1
           fi
           
-          # Check essential files exist
+          # Check essential files
           essential_files=(
-            "/tmp/test-build/rootfs/etc/alpine-release"
-            "/tmp/test-build/rootfs/usr/local/bin/install-update"
-            "/tmp/test-build/rootfs/usr/local/bin/update-daemon"
-            "/tmp/test-build/rootfs/etc/pi-star-version"
+            "/tmp/pi-star-build/rootfs/etc/alpine-release"
+            "/tmp/pi-star-build/rootfs/usr/local/bin/install-update"
+            "/tmp/pi-star-build/rootfs/usr/local/bin/update-daemon"
+            "/tmp/pi-star-build/rootfs/etc/pi-star-version"
           )
           
           for file in "${essential_files[@]}"; do
             if [ ! -f "$file" ]; then
-              echo "Missing essential file: $file"
+              echo "❌ Missing essential file: $file"
               exit 1
             fi
           done
           
-          echo "Build validation passed!"
+          # Check packages
+          if [ ! -f "output/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz" ]; then
+            echo "❌ Update package not created"
+            exit 1
+          fi
+          
+          if [ ! -f "output/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz.sig" ]; then
+            echo "❌ Package signature not created"
+            exit 1
+          fi
+          
+          # Check SD image
+          if [ ! -f "/tmp/pi-star-image-build/pi-star-${{ steps.version.outputs.VERSION }}.img.gz" ]; then
+            echo "❌ SD card image not created"
+            exit 1
+          fi
+          
+          # Verify signature
+          if openssl dgst -sha256 -verify keys/public.pem \
+             -signature "output/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz.sig" \
+             "output/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz"; then
+            echo "✅ Package signature verification passed"
+          else
+            echo "❌ Package signature verification failed"
+            exit 1
+          fi
+          
+          echo "✅ All validation checks passed!"
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-star-test-${{ steps.version.outputs.VERSION }}
+          path: |
+            output/*
+            /tmp/pi-star-image-build/pi-star-${{ steps.version.outputs.VERSION }}.img.gz
+            keys/public.pem
+          retention-days: 30
+
+      - name: Summary
+        run: |
+          echo "## 🧪 Test Build Complete!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.version.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Pi-Star Mode:** ${{ github.event.inputs.pi_star_mode || 'placeholder' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Generated Files:" >> $GITHUB_STEP_SUMMARY
+          echo "- \`pi-star-${{ steps.version.outputs.VERSION }}.tar.gz\` - Update package" >> $GITHUB_STEP_SUMMARY
+          echo "- \`pi-star-${{ steps.version.outputs.VERSION }}.tar.gz.sig\` - Package signature" >> $GITHUB_STEP_SUMMARY
+          echo "- \`pi-star-${{ steps.version.outputs.VERSION }}.img.gz\` - Full SD card image" >> $GITHUB_STEP_SUMMARY
+          echo "- \`test-release-info.json\` - Build metadata" >> $GITHUB_STEP_SUMMARY
+          echo "- \`public.pem\` - Test public key for verification" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔒 Security Notice:" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️  **Test builds use temporary signing keys**" >> $GITHUB_STEP_SUMMARY
+          echo "❌ **Will NOT update production update server**" >> $GITHUB_STEP_SUMMARY
+          echo "🧪 **For development and testing only**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📥 Download:" >> $GITHUB_STEP_SUMMARY
+          echo "Download artifacts from the **Artifacts** section above to test locally." >> $GITHUB_STEP_SUMMARY
+          
+          # Show file sizes
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Build Statistics:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "Update Package: $(ls -lh output/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz | awk '{print $5}')" >> $GITHUB_STEP_SUMMARY
+          echo "SD Card Image:  $(ls -lh /tmp/pi-star-image-build/pi-star-${{ steps.version.outputs.VERSION }}.img.gz | awk '{print $5}')" >> $GITHUB_STEP_SUMMARY
+          echo "Total Files:    $(tar -tzf output/pi-star-${{ steps.version.outputs.VERSION }}.tar.gz | wc -l) files in rootfs" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
