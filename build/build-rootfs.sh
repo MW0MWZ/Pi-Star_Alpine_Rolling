@@ -275,47 +275,9 @@ else
     echo "no_kernel_found" > "$BUILD_DIR/kernel-files/download_needed.txt"
 fi
 
-# PURE ALPINE: Download comprehensive Pi firmware for ALL models
-echo "=== DOWNLOADING COMPREHENSIVE PI FIRMWARE ==="
-sudo mkdir -p lib/firmware/brcm
-
-# Download firmware for ALL Pi models (comprehensive approach)
-declare -a firmware_files=(
-    "brcmfmac43430-sdio.bin"     # Pi Zero W, Pi 3
-    "brcmfmac43430-sdio.txt"
-    "brcmfmac43455-sdio.bin"     # Pi 3B+, Pi 4
-    "brcmfmac43455-sdio.txt"
-    "brcmfmac43455-sdio.clm_blob"
-    "brcmfmac43436-sdio.bin"     # Pi Zero 2W
-    "brcmfmac43436-sdio.txt"
-    "brcmfmac43456-sdio.bin"     # Pi 5
-    "brcmfmac43456-sdio.txt"
-    "brcmfmac43456-sdio.clm_blob"
-)
-
-echo "Downloading firmware for all Pi models..."
-for firmware in "${firmware_files[@]}"; do
-    if wget -q -O "lib/firmware/brcm/$firmware" \
-        "https://github.com/RPi-Distro/firmware-nonfree/raw/master/brcm80211/brcm/$firmware"; then
-        echo "✅ Downloaded $firmware"
-    else
-        echo "⚠️  Could not download $firmware (may not exist for this model)"
-    fi
-done
-
-# Create Pi model-specific firmware configurations
-echo "Creating Pi model-specific firmware configurations..."
-sudo cp lib/firmware/brcm/brcmfmac43430-sdio.txt \
-     lib/firmware/brcm/brcmfmac43430-sdio.raspberrypi,3-model-b.txt 2>/dev/null || true
-
-sudo cp lib/firmware/brcm/brcmfmac43436-sdio.txt \
-     lib/firmware/brcm/brcmfmac43436-sdio.raspberrypi,model-zero-2-w.txt 2>/dev/null || true
-
-sudo cp lib/firmware/brcm/brcmfmac43455-sdio.txt \
-     lib/firmware/brcm/brcmfmac43455-sdio.raspberrypi,4-model-b.txt 2>/dev/null || true
-
-sudo cp lib/firmware/brcm/brcmfmac43456-sdio.txt \
-     lib/firmware/brcm/brcmfmac43456-sdio.raspberrypi,5-model-b.txt 2>/dev/null || true
+# Note: We get all Pi firmware from linux-firmware-brcm package
+# No need to manually download individual files
+echo "✅ Pi firmware included in linux-firmware-brcm package"
 
 # Configure wireless driver for all Pi models (WiFi-only, no Bluetooth)
 echo "Configuring WiFi-only wireless drivers (Bluetooth disabled)..."
