@@ -9,7 +9,7 @@
             background-color: #f8f9fa;
         }
         .container { 
-            max-width: 900px; 
+            max-width: 1200px; 
             margin: 0 auto; 
             background: white;
             padding: 30px;
@@ -76,9 +76,15 @@
         .status-offline { background-color: #f44336; }
         .info-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            max-columns: 2;
             gap: 15px;
             margin: 20px 0;
+        }
+        @media (min-width: 900px) {
+            .info-grid {
+                grid-template-columns: 1fr 1fr;
+            }
         }
         .info-card {
             background: #f8f9fa;
@@ -155,22 +161,13 @@
         <h2>💻 Manual Usage</h2>
         
         <h3>Check for Updates</h3>
-        <pre><code>curl https://mw0mwz.github.io/Pi-Star_Alpine_Rolling/latest.json</code></pre>
+        <pre><code id="update-check-command">Loading update check command...</code></pre>
         
         <h3>Flash SD Card Image</h3>
-        <pre><code># Download and flash (replace X with your SD card device)
-wget [IMAGE_URL]
-gunzip -c pi-star-*.img.gz | sudo dd of=/dev/sdX bs=4M status=progress</code></pre>
+        <pre><code id="flash-commands">Loading flash commands...</code></pre>
         
         <h3>Verify Update Package</h3>
-        <pre><code># Download update and signature
-wget [UPDATE_URL]
-wget [SIGNATURE_URL]
-
-# Verify signature
-openssl dgst -sha256 -verify public-key.pem \
-  -signature pi-star-*.tar.gz.sig \
-  pi-star-*.tar.gz</code></pre>
+        <pre><code id="verify-commands">Loading verification commands...</code></pre>
         
         <h2>📚 Documentation</h2>
         <p>Complete setup and usage documentation available at:</p>
@@ -237,6 +234,26 @@ openssl dgst -sha256 -verify public-key.pem \
                 `;
                 
                 document.getElementById('download-info').innerHTML = downloadInfo;
+                
+                // Update command examples with real URLs
+                const githubBaseUrl = 'https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling/releases';
+                const imageUrl = `${githubBaseUrl}/download/v${data.latest_version}/pi-star-${data.latest_version}.img.gz`;
+                
+                // Update command blocks
+                document.getElementById('update-check-command').textContent = `curl ${baseUrl}/latest.json`;
+                
+                document.getElementById('flash-commands').textContent = `# Download and flash (replace X with your SD card device)
+wget ${imageUrl}
+gunzip -c pi-star-${data.latest_version}.img.gz | sudo dd of=/dev/sdX bs=4M status=progress`;
+                
+                document.getElementById('verify-commands').textContent = `# Download update and signature
+wget ${data.download_url}
+wget ${data.signature_url}
+
+# Verify signature (you'll need the public key from the repository)
+openssl dgst -sha256 -verify public-key.pem \\
+  -signature pi-star-${data.latest_version}.tar.gz.sig \\
+  pi-star-${data.latest_version}.tar.gz`;
             })
             .catch(error => {
                 // Update status for offline
