@@ -88,7 +88,9 @@ echo "Basic Alpine setup complete"
 CHROOT_SETUP
 
 # Install PURE Alpine packages (no Raspbian compatibility layers)
-# Install essential Alpine packages (streamlined for 100% Alpine)
+# Now install the streamlined Alpine package set inside chroot
+echo "Installing streamlined Alpine package set..."
+sudo chroot . /bin/sh << 'CHROOT_PACKAGES'
 echo "Installing core Alpine system..."
 apk add --no-cache \
     alpine-base \
@@ -114,49 +116,34 @@ apk add --no-cache \
     wget
 
 echo "✅ Streamlined Alpine packages installed"
+CHROOT_PACKAGES
 
-echo "Installing PURE ALPINE Raspberry Pi support..."
-# PURE ALPINE: Only use Alpine's Pi packages that actually exist
-
-# Install kernel first
-echo "Installing Alpine Raspberry Pi kernel..."
+echo "Installing PURE ALPINE Raspberry Pi kernel..."
+# Install Alpine's Pi kernel inside chroot
+sudo chroot . /bin/sh << 'CHROOT_KERNEL'
+echo "Installing Alpine Pi kernel and firmware..."
 apk add --no-cache linux-rpi
 
-# ULTRA-MINIMAL: WiFi-only firmware (no Bluetooth bloat)
-echo "Installing MINIMAL WiFi-only firmware (no Bluetooth)..."
-
-# Note: linux-firmware-brcm was already installed as dependency of linux-rpi
+echo "Installing minimal Pi firmware (WiFi only, no Bluetooth)..."
+# Note: linux-firmware-brcm is installed as dependency of linux-rpi
 echo "✅ linux-firmware-brcm already installed as kernel dependency"
 
-# Verify what Alpine actually installed
-echo "=== VERIFYING ALPINE FIRMWARE INSTALLATION ==="
-echo "Checking Alpine firmware installation..."
-
-if [ -d /lib/firmware ]; then
-    echo "✅ Firmware directory exists"
-    
-    if [ -d /lib/firmware/brcm ]; then
-        echo "✅ Broadcom firmware directory exists"
-        
-        # Count brcmfmac files specifically
-        BRCM_COUNT=$(find /lib/firmware/brcm/ -name "brcmfmac*" 2>/dev/null | wc -l)
-        echo "Broadcom WiFi firmware files found: $BRCM_COUNT"
-        
-        if [ "$BRCM_COUNT" -gt 0 ]; then
-            echo "✅ Alpine linux-firmware-brcm package working correctly"
-            echo "Sample firmware files:"
-            find /lib/firmware/brcm/ -name "brcmfmac*" | head -5
-        else
-            echo "⚠️  No brcmfmac files found"
-        fi
-    else
-        echo "❌ No brcm directory found"
+# Verify Alpine kernel and firmware installation
+echo "=== VERIFYING ALPINE INSTALLATION ==="
+if [ -d /lib/firmware/brcm ]; then
+    echo "✅ Broadcom firmware directory exists"
+    BRCM_COUNT=$(find /lib/firmware/brcm/ -name "brcmfmac*" 2>/dev/null | wc -l)
+    echo "✅ Broadcom WiFi firmware files found: $BRCM_COUNT"
+    if [ "$BRCM_COUNT" -gt 0 ]; then
+        echo "Sample firmware files:"
+        find /lib/firmware/brcm/ -name "brcmfmac*" | head -3
     fi
 else
-    echo "❌ No firmware directory found"
+    echo "❌ No Broadcom firmware directory found"
 fi
 
-echo "================================================="
+echo "✅ Pure Alpine Pi kernel and firmware installed"
+CHROOT_KERNEL
 
 # Skip Cypress entirely - it's mainly for Bluetooth on Pi Zero 2W
 # apk add --no-cache linux-firmware-cypress  # ❌ Bluetooth/combo chips - not needed
