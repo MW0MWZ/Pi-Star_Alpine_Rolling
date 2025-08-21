@@ -20,7 +20,7 @@ jobs:
       - name: Test rootfs build
         run: |
           sudo chmod +x build/*.sh
-          sudo ./build/build-rootfs.sh "test-$(date +%s)" "placeholder"
+          sudo -E ./build/build-rootfs.sh "test-$(date +%s)" "placeholder"
         env:
           BUILD_DIR: /tmp/test-build
           

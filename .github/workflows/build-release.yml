@@ -166,7 +166,7 @@ jobs:
 
       - name: Package and sign update
         run: |
-          sudo ./build/package-update.sh \
+          sudo -E ./build/package-update.sh \
             "${{ steps.version.outputs.VERSION }}" \
             "/tmp/pi-star-build/rootfs" \
             "output"
