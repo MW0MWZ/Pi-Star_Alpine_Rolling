@@ -1,23 +1,23 @@
 {
     "package": {
-        "name": "pi-star-0.0.1-alpha18.tar.gz",
-        "version": "0.0.1-alpha18",
-        "created": "2025-08-21T12:03:36Z",
-        "size": 64415927,
-        "sha256": "83341b0f15dbf32de2a9ac3668ebb30f78a9076bc949294b7062efd52c459a02",
-        "md5": "51133d92c3e8efca1261f7d2fdbdfb67"
+        "name": "pi-star-0.0.1-alpha19.tar.gz",
+        "version": "0.0.1-alpha19",
+        "created": "2025-08-21T12:25:24Z",
+        "size": 64416830,
+        "sha256": "2ddece7cc760f963c95c853106c37e10063520e662991dd4a2355424838094ca",
+        "md5": "64cb44abc2d9bbd9efe0458769a61eb4"
     },
     "signature": {
-        "file": "pi-star-0.0.1-alpha18.tar.gz.sig",
+        "file": "pi-star-0.0.1-alpha19.tar.gz.sig",
         "algorithm": "SHA256withRSA",
-        "created": "2025-08-21T12:03:36Z",
+        "created": "2025-08-21T12:25:24Z",
         "present": true
     },
     "build": {
         "rootfs_source": "/tmp/pi-star-build/rootfs",
         "build_host": "pkrvmqc4gcfdwos",
         "build_user": "root",
-        "git_commit": "4dac108d893da003dc025ccc2239754c57c72389",
+        "git_commit": "ffb4d750c3fe0a8cae4073ba808eeb6bd2091fad",
         "alpine_version": "3.22",
         "architecture": "armhf"
     }
