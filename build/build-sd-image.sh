@@ -180,16 +180,20 @@ mkdir -p mnt/data/{config,logs,database,backup}
 create_fstab() {
     local root_dir="$1"
     cat > "${root_dir}/etc/fstab" << 'EOF'
-# Pi-Star A/B Partition Layout
+# Pi-Star A/B Partition Layout with OS/Pi-Star separation
 LABEL=PISTAR_BOOT     /boot           vfat    defaults,noatime                    0 2
 LABEL=PISTAR_DATA     /opt/pistar     ext4    defaults,noatime                    0 2
 
-# Bind mounts for persistent data
-/opt/pistar/config    /etc/pistar     none    bind                                0 0
-/opt/pistar/logs      /var/log        none    bind                                0 0
+# Bind mounts for Pi-Star integration (preserves data across OS updates)
+/opt/pistar/config    /etc/pistar     none    bind,nofail                         0 0
+/opt/pistar/data/logs /var/log/pistar none    bind,nofail                         0 0
+
+# Temporary filesystem
+tmpfs                 /tmp            tmpfs   nodev,nosuid                        0 0
 EOF
 }
 
+# Apply to both partitions
 create_fstab "mnt/root-a"
 create_fstab "mnt/root-b"
 

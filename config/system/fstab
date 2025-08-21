@@ -1,3 +1,10 @@
-/dev/mmcblk0p1  /boot           vfat    defaults          0       2
-/dev/mmcblk0p4  /opt/pi-star/data ext4  defaults,noatime  0       2
-tmpfs           /tmp            tmpfs   nodev,nosuid      0       0
+# Pi-Star A/B Partition Layout with OS/Pi-Star separation
+LABEL=PISTAR_BOOT     /boot           vfat    defaults,noatime                    0 2
+LABEL=PISTAR_DATA     /opt/pistar     ext4    defaults,noatime                    0 2
+
+# Bind mounts for Pi-Star integration (preserves data across OS updates)
+/opt/pistar/config    /etc/pistar     none    bind,nofail                         0 0
+/opt/pistar/data/logs /var/log/pistar none    bind,nofail                         0 0
+
+# Temporary filesystem
+tmpfs                 /tmp            tmpfs   nodev,nosuid                        0 0
