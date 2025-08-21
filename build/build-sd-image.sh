@@ -313,11 +313,14 @@ cp fixup*.dat ../mnt/boot/ 2>/dev/null || echo "fixup.dat files not available"
 cd ..
 rm -rf firmware-temp
 
-# Install Alpine kernel as the PRIMARY kernel
-echo "Installing Alpine kernel as primary boot kernel..."
-cp "$ALPINE_KERNEL" mnt/boot/kernel.img
-cp "$ALPINE_KERNEL" mnt/boot/kernel7.img  # For Pi 2/3
-cp "$ALPINE_KERNEL" mnt/boot/kernel7l.img # For Pi 4
+# Install Alpine kernel as ALL required kernel variants
+echo "Installing Alpine kernel as all required Pi-Star kernel variants..."
+cp "$ALPINE_KERNEL" mnt/boot/kernel.img    # Pi 1/2 (original)
+cp "$ALPINE_KERNEL" mnt/boot/kernel7.img   # Pi 2/3 (ARMv7)
+cp "$ALPINE_KERNEL" mnt/boot/kernel7l.img  # Pi 2B v1.2+, Pi 4 (ARMv7l/ARMv8 32-bit)
+cp "$ALPINE_KERNEL" mnt/boot/kernel8.img   # Pi 3/4/5 (64-bit) - Your proven config
+
+echo "✅ Installed kernel variants for all Pi models including Pi 2B v1.2+ (kernel7l.img)"
 cp "$ALPINE_KERNEL" mnt/boot/kernel8.img  # For Pi 3/4 64-bit mode
 
 if [ -n "$ALPINE_INITRD" ] && [ -f "$ALPINE_INITRD" ]; then
@@ -331,11 +334,11 @@ if [ -n "$ALPINE_INITRD" ] && [ -f "$ALPINE_INITRD" ]; then
         KERNEL_VER=$(basename "$ALPINE_INITRD" | sed 's/initramfs-//')
     fi
     
-    # Install initrd with multiple names for compatibility
-    cp "$ALPINE_INITRD" mnt/boot/initrd.img
-    cp "$ALPINE_INITRD" mnt/boot/initrd7.img
-    cp "$ALPINE_INITRD" mnt/boot/initrd7l.img
-    cp "$ALPINE_INITRD" mnt/boot/initrd8.img
+    # Install initrd with all required variants for maximum Pi compatibility
+    cp "$ALPINE_INITRD" mnt/boot/initrd.img    # Pi 1/2 (original)
+    cp "$ALPINE_INITRD" mnt/boot/initrd7.img   # Pi 2/3 (ARMv7)
+    cp "$ALPINE_INITRD" mnt/boot/initrd7l.img  # Pi 2B v1.2+, Pi 4 (ARMv7l/ARMv8 32-bit)
+    cp "$ALPINE_INITRD" mnt/boot/initrd8.img   # Pi 3/4/5 (64-bit)
     
     # Also use the original Alpine naming
     cp "$ALPINE_INITRD" "mnt/boot/initramfs-rpi"
@@ -348,73 +351,98 @@ else
     INITRD_CMDLINE=""
 fi
 
-# Create PURE ALPINE config.txt with enhanced boot debugging
-echo "Creating Pure Alpine config.txt with boot diagnostics..."
+# Create HYBRID config.txt based on working Pi-Star configuration
+echo "Creating hybrid Alpine + Pi-Star optimized config.txt..."
 cat > mnt/boot/config.txt << 'EOF'
-# Pi-Star Pure Alpine Configuration - BOOT DIAGNOSTIC VERSION
-# Uses 100% Alpine kernel (no Pi Foundation kernel mixing)
+# Pi-Star Alpine Configuration - Based on proven Pi-Star settings
+# Uses Alpine's kernel8.img (64-bit) as per original working config
 
-# BOOT DEBUGGING - Enable verbose output
-enable_uart=1
-uart_2ndstage=1
-
-# GPU memory (minimal for headless)
-gpu_mem=16
-
-# Audio support
+# Enable audio (loads snd_bcm2835)
 dtparam=audio=on
 
-# GPIO/SPI/I2C support  
-dtparam=spi=on
-dtparam=i2c_arm=on
+# Automatically load overlays for detected cameras
+camera_auto_detect=0
 
-# BOOT DIAGNOSTICS - Show detailed boot process
-boot_delay=2
-disable_splash=0
+# Automatically load overlays for detected DSI displays  
+display_auto_detect=1
 
-# KERNEL SELECTION - Let Pi firmware choose appropriate kernel
-# Don't force specific kernel names initially
-# kernel=kernel.img
+# Automatically load initramfs files, if found
+auto_initramfs=1
 
-# COMPATIBILITY - Support all Pi models with fallbacks
-[pi02]
-# Pi Zero 2W - try multiple kernel options
-kernel=kernel7.img
+# Enable DRM VC4 V3D driver (for any GUI applications)
+dtoverlay=vc4-kms-v3d
+max_framebuffers=2
+
+# Don't have the firmware create an initial video= setting in cmdline.txt
+disable_fw_kms_setup=1
+
+# Disable compensation for displays with overscan
+disable_overscan=1
+
+# Free up RAM (Pi-Star optimized)
+gpu_mem=16
+
+# D2RG UART over SPI (Pi-Star specific hardware)
+dtoverlay=sc16is752-spi0-ce0
+
+# UART Configuration (Pi-Star digital radio requirements)
+dtoverlay=miniuart-bt
+dtparam=uart0=on
+dtparam=uart1=on
+
+# Temperature protection
+temp_limit=75
+
+# Model Specific Configurations - EXACT COPY of working Pi-Star config
+[pi1]
+kernel=kernel.img
+gpu_freq=100
+
+[pi2]
+kernel=kernel.img
+gpu_freq=100
 
 [pi3]
-# Pi 3A+/3B+ - try multiple kernel options  
-kernel=kernel7.img
+kernel=kernel8.img
+arm_freq=1000
+gpu_freq=100
+
+[pi3+]
+kernel=kernel8.img
+arm_freq=1200
+gpu_freq=100
+
+[pi02]
+cmdline=cmdline02w.txt
+kernel=kernel8.img
+arm_freq=900
+gpu_freq=100
 
 [pi4]
-# Pi 4
-kernel=kernel7l.img
+kernel=kernel8.img
 
 [pi5]
-# Pi 5
-kernel=kernel7l.img
+kernel=kernel8.img
 
 [all]
-# DEBUGGING - Verbose boot output
+# Pi-Star GPIO/Communication requirements
+dtparam=i2c_arm=on
+dtparam=spi=on
+
+# Alpine initramfs support
 initramfs initrd.img followkernel
-
-# Wireless optimization
-dtparam=krnbt=off
-
-# MEMORY/PERFORMANCE
-gpu_mem=16
-arm_freq=900
-core_freq=250
-sdram_freq=400
-
-# BOOT PROCESS DEBUGGING
-bootcode_delay=1
-boot_delay=1
 EOF
 
-# Create Alpine-optimized cmdline.txt with boot debugging
-echo "Creating Alpine-optimized cmdline.txt with diagnostics..."
+# Create Pi Zero 2W specific cmdline (based on your working config)
+echo "Creating Pi Zero 2W specific cmdline.txt..."
+cat > mnt/boot/cmdline02w.txt << EOF
+dwc_otg.lpm_enable=0 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 elevator=deadline fsck.repair=yes fsck.mode=force brcmfmac.roamoff=1 brcmfmac.feature_disable=0x82000 net.ifnames=0 rootwait quiet noswap ${INITRD_CMDLINE}
+EOF
+
+# Create standard cmdline.txt (based on your working config)
+echo "Creating standard cmdline.txt..."
 cat > mnt/boot/cmdline.txt << EOF
-console=serial0,115200 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 rootwait rw init=/sbin/init debug loglevel=7 ${INITRD_CMDLINE}
+dwc_otg.lpm_enable=0 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 elevator=deadline fsck.repair=yes fsck.mode=force net.ifnames=0 rootwait quiet noswap ${INITRD_CMDLINE}
 EOF
 
 # Create A/B state file (start with slot A)
