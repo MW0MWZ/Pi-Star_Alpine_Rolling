@@ -128,15 +128,30 @@ echo "Installing PURE ALPINE Raspberry Pi support..."
 echo "Installing Alpine Raspberry Pi kernel..."
 apk add --no-cache linux-rpi
 
-# Install firmware packages (excluding non-existent ones)
-echo "Installing Alpine firmware packages..."
-apk add --no-cache \
-    linux-firmware \
-    linux-firmware-brcm \
-    linux-firmware-cypress
+# OPTIMIZED: Install only Pi-specific firmware (not the entire firmware bloat)
+echo "Installing MINIMAL Pi-specific firmware only..."
 
-# Note: linux-firmware-ath9k doesn't exist in Alpine 3.22, skipping
+# Instead of the massive linux-firmware package, let's be surgical:
+# apk add --no-cache linux-firmware  # ❌ This is 200MB+ of mostly useless firmware
 
+# Install only essential Pi wireless firmware
+echo "Installing Broadcom wireless firmware for Pi..."
+apk add --no-cache linux-firmware-brcm    # Pi wireless chips
+
+# Install only if Cypress chips are present (Pi Zero 2W specific)
+echo "Installing Cypress firmware for specific Pi models..."
+apk add --no-cache linux-firmware-cypress  # Pi Zero 2W Bluetooth/WiFi
+
+# Skip these massive firmware packages that Pi doesn't need:
+# linux-firmware-ath9k     # ❌ Atheros - not used on Pi  
+# linux-firmware-ath10k    # ❌ More Atheros - not used on Pi
+# linux-firmware-intel     # ❌ Intel wireless - not used on Pi
+# linux-firmware-realtek   # ❌ Realtek - not used on Pi
+# linux-firmware-nvidia    # ❌ NVIDIA GPU - not used on Pi
+# linux-firmware-amd       # ❌ AMD GPU - not used on Pi
+# linux-firmware-radeon    # ❌ Radeon GPU - not used on Pi
+
+echo "✅ Minimal Pi-specific firmware installed (instead of 200MB+ bloat)"
 echo "Pure Alpine Pi packages installed - no Pi Foundation kernel mixing"
 
 # CRITICAL FIX: Trigger kernel installation and copy files
