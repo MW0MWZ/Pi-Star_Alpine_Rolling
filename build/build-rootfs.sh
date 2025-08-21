@@ -131,8 +131,82 @@ apk add --no-cache linux-rpi
 # ULTRA-MINIMAL: WiFi-only firmware (no Bluetooth bloat)
 echo "Installing MINIMAL WiFi-only firmware (no Bluetooth)..."
 
-# Install only Broadcom WiFi firmware for Pi wireless chips
-apk add --no-cache linux-firmware-brcm    # Pi WiFi chips only
+# First, check if the package exists
+echo "Checking Alpine package availability..."
+if apk search linux-firmware-brcm | grep -q "linux-firmware-brcm"; then
+    echo "✅ linux-firmware-brcm package available"
+    
+    # Install only Broadcom WiFi firmware for Pi wireless chips
+    apk add --no-cache linux-firmware-brcm    # Pi WiFi chips only
+    
+    # Verify what Alpine actually installed
+    echo "=== VERIFYING ALPINE FIRMWARE INSTALLATION ==="
+    echo "Checking Alpine firmware installation..."
+
+    if [ -d /lib/firmware ]; then
+        echo "✅ Firmware directory exists"
+        echo "Firmware subdirectories:"
+        ls -la /lib/firmware/ | head -10
+        
+        if [ -d /lib/firmware/brcm ]; then
+            echo "✅ Broadcom firmware directory exists"
+            echo "Broadcom firmware files installed:"
+            ls -la /lib/firmware/brcm/ | head -20
+            
+            # Count brcmfmac files specifically
+            BRCM_COUNT=$(find /lib/firmware/brcm/ -name "brcmfmac*" 2>/dev/null | wc -l)
+            echo "Broadcom WiFi firmware files found: $BRCM_COUNT"
+            
+            if [ "$BRCM_COUNT" -gt 0 ]; then
+                echo "✅ Alpine linux-firmware-brcm package working correctly"
+            else
+                echo "⚠️  No brcmfmac files found - checking package contents"
+                apk info -L linux-firmware-brcm | grep brcmfmac | head -10 || echo "Package not installed or no brcmfmac files"
+            fi
+        else
+            echo "❌ No brcm directory found"
+        fi
+    else
+        echo "❌ No firmware directory found"
+    fi
+    
+    echo "================================================="
+else
+    echo "⚠️  linux-firmware-brcm package not found in Alpine 3.22"
+    echo "Available firmware packages:"
+    apk search linux-firmware | head -10
+    
+    echo "Falling back to manual firmware installation..."
+    # Create the directory structure
+    mkdir -p /lib/firmware/brcm
+    
+    # Download essential Pi WiFi firmware manually
+    echo "Downloading essential Pi WiFi firmware..."
+    declare -a essential_firmware=(
+        "brcmfmac43430-sdio.bin"     # Pi Zero W, Pi 3
+        "brcmfmac43430-sdio.txt"
+        "brcmfmac43455-sdio.bin"     # Pi 3B+, Pi 4
+        "brcmfmac43455-sdio.txt"
+        "brcmfmac43436-sdio.bin"     # Pi Zero 2W
+        "brcmfmac43436-sdio.txt"
+        "brcmfmac43456-sdio.bin"     # Pi 5
+        "brcmfmac43456-sdio.txt"
+    )
+    
+    for firmware in "${essential_firmware[@]}"; do
+        echo "Downloading $firmware..."
+        if wget -q -O "/lib/firmware/brcm/$firmware" \
+            "https://github.com/RPi-Distro/firmware-nonfree/raw/master/brcm80211/brcm/$firmware"; then
+            echo "✅ Downloaded $firmware"
+        else
+            echo "⚠️  Could not download $firmware"
+        fi
+    done
+    
+    # Verify manual download
+    MANUAL_COUNT=$(find /lib/firmware/brcm/ -name "brcmfmac*" 2>/dev/null | wc -l)
+    echo "Manually downloaded firmware files: $MANUAL_COUNT"
+fi
 
 # Skip Cypress entirely - it's mainly for Bluetooth on Pi Zero 2W
 # apk add --no-cache linux-firmware-cypress  # ❌ Bluetooth/combo chips - not needed
@@ -1051,11 +1125,40 @@ echo "Pure Alpine Pi components:"
 [ -f etc/modprobe.d/brcmfmac.conf ] && echo "✅ Wireless driver config created" || echo "❌ Wireless driver config missing"
 [ -f etc/modules-load.d/pi-wireless.conf ] && echo "✅ Module loading config created" || echo "❌ Module loading config missing"
 
-echo "Pi firmware for all models:"
-[ -f lib/firmware/brcm/brcmfmac43430-sdio.bin ] && echo "✅ Pi Zero W / Pi 3 firmware" || echo "❌ Pi Zero W / Pi 3 firmware missing"
-[ -f lib/firmware/brcm/brcmfmac43436-sdio.bin ] && echo "✅ Pi Zero 2W firmware" || echo "❌ Pi Zero 2W firmware missing"
-[ -f lib/firmware/brcm/brcmfmac43455-sdio.bin ] && echo "✅ Pi 3B+ / Pi 4 firmware" || echo "❌ Pi 3B+ / Pi 4 firmware missing"
-[ -f lib/firmware/brcm/brcmfmac43456-sdio.bin ] && echo "✅ Pi 5 firmware" || echo "❌ Pi 5 firmware missing"
+echo "Pi firmware verification (from Alpine packages):"
+# Check where Alpine actually installs the firmware files
+if [ -d lib/firmware/brcm ]; then
+    echo "✅ Alpine firmware directory exists: lib/firmware/brcm"
+    
+    # List what Alpine actually installed
+    echo "Firmware files installed by Alpine linux-firmware-brcm:"
+    ls lib/firmware/brcm/ | grep -E "brcmfmac.*\.(bin|txt|clm_blob)$" | head -10 || echo "No brcmfmac files found"
+    
+    # Check for specific Pi firmware (Alpine may use different names/locations)
+    FIRMWARE_COUNT=$(find lib/firmware/brcm/ -name "brcmfmac*" | wc -l)
+    if [ "$FIRMWARE_COUNT" -gt 0 ]; then
+        echo "✅ Pi firmware files found: $FIRMWARE_COUNT files"
+        echo "Sample files:"
+        find lib/firmware/brcm/ -name "brcmfmac*" | head -5
+    else
+        echo "⚠️  No brcmfmac firmware files found in Alpine package"
+        echo "Available firmware files:"
+        ls lib/firmware/brcm/ | head -10 || echo "Directory empty"
+    fi
+else
+    echo "❌ Firmware directory lib/firmware/brcm not found"
+    echo "Available firmware directories:"
+    find lib/firmware/ -type d | head -10 || echo "No firmware directories found"
+fi
+
+# Check if Broadcom wireless module support exists
+echo "Broadcom wireless module verification:"
+if find lib/modules/*/kernel/ -name "brcmfmac*" >/dev/null 2>&1; then
+    echo "✅ brcmfmac kernel module found"
+    find lib/modules/*/kernel/ -name "brcmfmac*" | head -3
+else
+    echo "❌ brcmfmac kernel module not found"
+fi
 
 echo "CRITICAL FIX: Kernel file export verification:"
 if [ -d "$BUILD_DIR/kernel-files" ]; then
