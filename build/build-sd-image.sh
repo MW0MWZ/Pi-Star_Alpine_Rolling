@@ -3,7 +3,7 @@ set -e
 
 VERSION="$1"
 OUTPUT_FILE="${2:-pi-star-${VERSION}.img}"
-IMAGE_SIZE="${IMAGE_SIZE:-8G}"  # 8GB image
+IMAGE_SIZE="${IMAGE_SIZE:-4G}"  # 4GB image for smaller SD cards
 BUILD_DIR="${BUILD_DIR:-/tmp/pi-star-image-build}"
 
 if [ -z "$VERSION" ]; then
@@ -28,7 +28,7 @@ cd "$BUILD_DIR"
 
 # Create empty image file
 echo "Creating ${IMAGE_SIZE} disk image..."
-dd if=/dev/zero of="$OUTPUT_FILE" bs=1M count=0 seek=8192 status=progress
+dd if=/dev/zero of="$OUTPUT_FILE" bs=1M count=0 seek=4096 status=progress
 
 # Set up loop device
 LOOP_DEVICE=$(losetup -f)
@@ -49,14 +49,14 @@ echo "Creating partition table..."
 parted -s "$LOOP_DEVICE" mklabel msdos
 
 echo "Creating partitions..."
-# Boot partition - 256MB
+# Boot partition - 256MB (1MiB to 257MiB)
 parted -s "$LOOP_DEVICE" mkpart primary fat32 1MiB 257MiB
-# RootFS-A - 2.5GB  
-parted -s "$LOOP_DEVICE" mkpart primary ext4 257MiB 2817MiB
-# RootFS-B - 2.5GB
-parted -s "$LOOP_DEVICE" mkpart primary ext4 2817MiB 5377MiB
-# Data partition - remaining space
-parted -s "$LOOP_DEVICE" mkpart primary ext4 5377MiB 100%
+# RootFS-A - 1GB (257MiB to 1281MiB)  
+parted -s "$LOOP_DEVICE" mkpart primary ext4 257MiB 1281MiB
+# RootFS-B - 1GB (1281MiB to 2305MiB)
+parted -s "$LOOP_DEVICE" mkpart primary ext4 1281MiB 2305MiB
+# Data partition - 500MB (2305MiB to 2817MiB)
+parted -s "$LOOP_DEVICE" mkpart primary ext4 2305MiB 2817MiB
 
 # Set boot flag
 parted -s "$LOOP_DEVICE" set 1 boot on
@@ -98,6 +98,25 @@ fi
 cp rpi-firmware/boot/*.bin mnt/boot/
 cp rpi-firmware/boot/*.dat mnt/boot/
 cp rpi-firmware/boot/*.elf mnt/boot/
+
+# Install kernel and device tree files
+echo "Installing Raspberry Pi kernel..."
+# For 32-bit ARM (armhf)
+cp rpi-firmware/boot/kernel7l.img mnt/boot/  # Pi 4 32-bit kernel
+cp rpi-firmware/boot/kernel7.img mnt/boot/   # Pi 2/3 32-bit kernel  
+cp rpi-firmware/boot/kernel.img mnt/boot/    # Pi 1/Zero kernel
+
+# Copy device tree files
+cp rpi-firmware/boot/*.dtb mnt/boot/
+cp -r rpi-firmware/boot/overlays mnt/boot/
+
+# Install kernel modules to both root partitions
+echo "Installing kernel modules..."
+if [ -d "rpi-firmware/modules" ]; then
+    # Copy modules to both root partitions
+    cp -r rpi-firmware/modules/* mnt/root-a/lib/modules/ 2>/dev/null || true
+    cp -r rpi-firmware/modules/* mnt/root-b/lib/modules/ 2>/dev/null || true
+fi
 
 # Create basic config.txt for Raspberry Pi (32-bit)
 cat > mnt/boot/config.txt << 'EOF'
@@ -240,11 +259,13 @@ echo "SD card image build complete!"
 echo "Image: ${OUTPUT_FILE}.gz"
 echo "Size: $(ls -lh "${OUTPUT_FILE}.gz" | awk '{print $5}')"
 echo ""
-echo "To flash to SD card:"
+echo "To flash to SD card (4GB+):"
 echo "  gunzip -c ${OUTPUT_FILE}.gz | sudo dd of=/dev/sdX bs=4M status=progress"
 echo ""
-echo "Partition layout:"
+echo "Partition layout (fits on 4GB SD card):"
 echo "  /dev/mmcblk0p1 - Boot (256MB, FAT32)"
-echo "  /dev/mmcblk0p2 - Pi-Star Root A (2.5GB, ext4)"  
-echo "  /dev/mmcblk0p3 - Pi-Star Root B (2.5GB, ext4)"
-echo "  /dev/mmcblk0p4 - Persistent Data (remaining, ext4)"
+echo "  /dev/mmcblk0p2 - Pi-Star Root A (1GB, ext4)"  
+echo "  /dev/mmcblk0p3 - Pi-Star Root B (1GB, ext4)"
+echo "  /dev/mmcblk0p4 - Persistent Data (500MB, ext4)"
+echo ""
+echo "Total used: ~2.75GB (fits comfortably in 4GB)"

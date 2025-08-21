@@ -163,6 +163,13 @@ apk add --no-cache \
     ca-certificates \
     tzdata
 
+echo "Installing Raspberry Pi kernel and modules..."
+apk add --no-cache \
+    linux-rpi \
+    linux-firmware-brcm \
+    linux-firmware-cypress \
+    raspberrypi-bootloader
+
 echo "Package installation complete"
 CHROOT_PACKAGES
 
