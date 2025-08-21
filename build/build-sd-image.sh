@@ -313,49 +313,37 @@ cp fixup*.dat ../mnt/boot/ 2>/dev/null || echo "fixup.dat files not available"
 cd ..
 rm -rf firmware-temp
 
-# Install Alpine kernel as ALL required kernel variants
-echo "Installing Alpine kernel as all required Pi-Star kernel variants..."
-cp "$ALPINE_KERNEL" mnt/boot/kernel.img    # Pi 1/2 (original)
+# Install Alpine kernel using STANDARD Pi paths (not Alpine's layered filesystem)
+echo "Installing Alpine kernel using standard Pi boot paths..."
+
+# Install kernel with standard Pi naming conventions
+cp "$ALPINE_KERNEL" mnt/boot/kernel.img    # Pi 1/2
 cp "$ALPINE_KERNEL" mnt/boot/kernel7.img   # Pi 2/3 (ARMv7)
-cp "$ALPINE_KERNEL" mnt/boot/kernel7l.img  # Pi 2B v1.2+, Pi 4 (ARMv7l/ARMv8 32-bit)
+cp "$ALPINE_KERNEL" mnt/boot/kernel7l.img  # Pi 2B v1.2+, Pi 4 (ARMv7l)
 cp "$ALPINE_KERNEL" mnt/boot/kernel8.img   # Pi 3/4/5 (64-bit) - Your proven config
 
-echo "✅ Installed kernel variants for all Pi models including Pi 2B v1.2+ (kernel7l.img)"
+echo "✅ Installed Alpine kernel with standard Pi naming (no /boot/boot madness)"
 cp "$ALPINE_KERNEL" mnt/boot/kernel8.img  # For Pi 3/4 64-bit mode
 
 if [ -n "$ALPINE_INITRD" ] && [ -f "$ALPINE_INITRD" ]; then
-    echo "Installing Alpine initrd with multiple naming conventions..."
+    echo "Installing Alpine initramfs using standard Pi paths..."
     
-    # Get the kernel version from the initrd filename or use a default
-    if echo "$ALPINE_INITRD" | grep -q "6\.12\."; then
-        KERNEL_VER="6.12.38-0-rpi"
-    else
-        # Extract kernel version from filename
-        KERNEL_VER=$(basename "$ALPINE_INITRD" | sed 's/initramfs-//')
-    fi
-    
-    # Install initrd with all required variants for maximum Pi compatibility
-    cp "$ALPINE_INITRD" mnt/boot/initrd.img    # Pi 1/2 (original)
+    # Install initramfs with standard Pi naming conventions
+    cp "$ALPINE_INITRD" mnt/boot/initrd.img    # Pi 1/2
     cp "$ALPINE_INITRD" mnt/boot/initrd7.img   # Pi 2/3 (ARMv7)
-    cp "$ALPINE_INITRD" mnt/boot/initrd7l.img  # Pi 2B v1.2+, Pi 4 (ARMv7l/ARMv8 32-bit)
-    cp "$ALPINE_INITRD" mnt/boot/initrd8.img   # Pi 3/4/5 (64-bit)
+    cp "$ALPINE_INITRD" mnt/boot/initrd7l.img  # Pi 2B v1.2+, Pi 4 (ARMv7l)
+    cp "$ALPINE_INITRD" mnt/boot/initrd8.img   # Pi 3/4/5 (64-bit) - matches kernel8.img
     
-    # Also use the original Alpine naming
-    cp "$ALPINE_INITRD" "mnt/boot/initramfs-rpi"
-    cp "$ALPINE_INITRD" "mnt/boot/initramfs-${KERNEL_VER}"
-    
-    echo "✅ Initrd installed with multiple naming conventions"
-    INITRD_CMDLINE="initramfs initrd.img followkernel"
+    echo "✅ Installed Alpine initramfs with standard Pi naming"
 else
-    echo "⚠️  No initrd found - booting without initramfs"
-    INITRD_CMDLINE=""
+    echo "⚠️  No initramfs found - Alpine will boot without initramfs"
 fi
 
-# Create HYBRID config.txt based on working Pi-Star configuration
-echo "Creating hybrid Alpine + Pi-Star optimized config.txt..."
+# Create STANDARD Pi config.txt with your proven Pi-Star settings + Alpine compatibility
+echo "Creating standard Pi config.txt with Pi-Star optimizations..."
 cat > mnt/boot/config.txt << 'EOF'
-# Pi-Star Alpine Configuration - Based on proven Pi-Star settings
-# Uses Alpine's kernel8.img (64-bit) as per original working config
+# Pi-Star Alpine Configuration - Standard Pi boot + your proven Pi-Star settings
+# Uses traditional Pi kernel paths (not Alpine's layered filesystem approach)
 
 # Enable audio (loads snd_bcm2835)
 dtparam=audio=on
@@ -365,9 +353,6 @@ camera_auto_detect=0
 
 # Automatically load overlays for detected DSI displays  
 display_auto_detect=1
-
-# Automatically load initramfs files, if found
-auto_initramfs=1
 
 # Enable DRM VC4 V3D driver (for any GUI applications)
 dtoverlay=vc4-kms-v3d
@@ -393,7 +378,7 @@ dtparam=uart1=on
 # Temperature protection
 temp_limit=75
 
-# Model Specific Configurations - EXACT COPY of working Pi-Star config
+# Model Specific Configurations - YOUR PROVEN Pi-Star settings
 [pi1]
 kernel=kernel.img
 gpu_freq=100
@@ -429,20 +414,20 @@ kernel=kernel8.img
 dtparam=i2c_arm=on
 dtparam=spi=on
 
-# Alpine initramfs support
-initramfs initrd.img followkernel
+# Standard initramfs approach (not Alpine's layered system)
+initramfs initrd8.img followkernel
 EOF
 
-# Create Pi Zero 2W specific cmdline (based on your working config)
+# Create Pi Zero 2W specific cmdline (your proven config + minimal Alpine modules)
 echo "Creating Pi Zero 2W specific cmdline.txt..."
-cat > mnt/boot/cmdline02w.txt << EOF
-dwc_otg.lpm_enable=0 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 elevator=deadline fsck.repair=yes fsck.mode=force brcmfmac.roamoff=1 brcmfmac.feature_disable=0x82000 net.ifnames=0 rootwait quiet noswap ${INITRD_CMDLINE}
+cat > mnt/boot/cmdline02w.txt << 'EOF'
+dwc_otg.lpm_enable=0 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 elevator=deadline fsck.repair=yes fsck.mode=force brcmfmac.roamoff=1 brcmfmac.feature_disable=0x82000 net.ifnames=0 rootwait quiet noswap
 EOF
 
-# Create standard cmdline.txt (based on your working config)
+# Create standard cmdline.txt (your proven config + minimal Alpine modules)  
 echo "Creating standard cmdline.txt..."
-cat > mnt/boot/cmdline.txt << EOF
-dwc_otg.lpm_enable=0 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 elevator=deadline fsck.repair=yes fsck.mode=force net.ifnames=0 rootwait quiet noswap ${INITRD_CMDLINE}
+cat > mnt/boot/cmdline.txt << 'EOF'
+dwc_otg.lpm_enable=0 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 elevator=deadline fsck.repair=yes fsck.mode=force net.ifnames=0 rootwait quiet noswap
 EOF
 
 # Create A/B state file (start with slot A)
