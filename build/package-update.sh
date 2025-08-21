@@ -37,9 +37,18 @@ SIGNATURE_PATH="${PACKAGE_PATH}.sig"
 echo "Creating package: $PACKAGE_PATH"
 echo "From rootfs: $ROOTFS_DIR"
 
-# Create the update package
+# Check if we're running as root or need sudo for tar
+if [ "$EUID" -eq 0 ]; then
+    echo "Running as root - can preserve all file permissions"
+    TAR_CMD="tar"
+else
+    echo "Running as non-root - will use sudo for tar to handle special permissions"
+    TAR_CMD="sudo tar"
+fi
+
+# FIXED: Create the update package with proper permission handling
 echo "Creating tarball..."
-tar -czf "$PACKAGE_PATH" \
+$TAR_CMD -czf "$PACKAGE_PATH" \
     -C "$ROOTFS_DIR" \
     --exclude="proc/*" \
     --exclude="sys/*" \
@@ -50,9 +59,16 @@ tar -czf "$PACKAGE_PATH" \
     --exclude="run/*" \
     --exclude="mnt/*" \
     --exclude="media/*" \
+    --numeric-owner \
     --owner=0 \
     --group=0 \
     .
+
+# If we used sudo for tar, fix ownership of the created package
+if [ "$EUID" -ne 0 ]; then
+    echo "Fixing package ownership..."
+    sudo chown "$USER:$USER" "$PACKAGE_PATH"
+fi
 
 # Verify the package was created
 if [ ! -f "$PACKAGE_PATH" ]; then
@@ -133,7 +149,8 @@ cat > "package-manifest.json" << EOF
         "build_user": "$(whoami)",
         "git_commit": "${GITHUB_SHA:-unknown}",
         "alpine_version": "${ALPINE_VERSION:-unknown}",
-        "architecture": "${BUILD_ARCH:-unknown}"
+        "architecture": "${BUILD_ARCH:-unknown}",
+        "packaging_method": "$([ "$EUID" -eq 0 ] && echo 'root' || echo 'sudo')"
     }
 }
 EOF

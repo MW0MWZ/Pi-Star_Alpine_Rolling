@@ -132,7 +132,9 @@ jobs:
       - name: Package and sign test update
         run: |
           mkdir -p output
-          sudo chown -R $USER:$USER /tmp/pi-star-build/rootfs output
+          # FIXED: Don't change rootfs ownership - let packaging script handle permissions with sudo
+          echo "Creating update package with proper permission handling..."
+          chmod +x build/package-update.sh
           ./build/package-update.sh \
             "${{ steps.version.outputs.VERSION }}" \
             "/tmp/pi-star-build/rootfs" \
