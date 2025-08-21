@@ -117,29 +117,27 @@ apk add --no-cache \
 
 echo "✅ Streamlined Alpine packages installed"
 
-echo "Installing PURE ALPINE Raspberry Pi kernel..."
-# Install Alpine's Pi kernel inside chroot
+echo "Installing PURE ALPINE Raspberry Pi kernel and firmware..."
+# Install Alpine's Pi kernel and firmware packages
 sudo chroot . /bin/sh << 'CHROOT_KERNEL'
-echo "Installing Alpine Pi kernel and firmware..."
-apk add --no-cache linux-rpi
+echo "Installing Alpine Pi kernel and all firmware..."
+apk add --no-cache \
+    linux-rpi \
+    raspberrypi-bootloader
 
-echo "Installing minimal Pi firmware (WiFi only, no Bluetooth)..."
-# Note: linux-firmware-brcm is installed as dependency of linux-rpi
-echo "✅ linux-firmware-brcm already installed as kernel dependency"
+echo "Checking available Pi firmware packages..."
+apk search raspberrypi
+apk search device-tree
 
-# Verify Alpine kernel and firmware installation
-echo "=== VERIFYING ALPINE INSTALLATION ==="
-if [ -d /lib/firmware/brcm ]; then
-    echo "✅ Broadcom firmware directory exists"
-    BRCM_COUNT=$(find /lib/firmware/brcm/ -name "brcmfmac*" 2>/dev/null | wc -l)
-    echo "✅ Broadcom WiFi firmware files found: $BRCM_COUNT"
-    if [ "$BRCM_COUNT" -gt 0 ]; then
-        echo "Sample firmware files:"
-        find /lib/firmware/brcm/ -name "brcmfmac*" | head -3
-    fi
-else
-    echo "❌ No Broadcom firmware directory found"
-fi
+# Install device tree compiler if available
+apk add --no-cache device-tree-compiler || echo "device-tree-compiler not available"
+
+echo "Verifying Alpine Pi firmware installation..."
+echo "Boot directory contents:"
+ls -la /boot/ || echo "Boot directory empty or missing"
+
+echo "Firmware directory contents:"
+ls -la /lib/firmware/brcm/ | head -5 || echo "Firmware directory empty"
 
 echo "✅ Pure Alpine Pi kernel and firmware installed"
 CHROOT_KERNEL
