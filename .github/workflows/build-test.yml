@@ -97,11 +97,19 @@ jobs:
       - name: Generate test signing keys
         run: |
           mkdir -p keys
-          # Generate temporary keys for test builds (not for production!)
-          openssl genpkey -algorithm RSA -out keys/private.pem -pkcs8
+          # FIXED: Generate temporary keys for test builds using correct OpenSSL syntax
+          echo "Generating RSA private key..."
+          openssl genpkey -algorithm RSA -out keys/private.pem -pkeyopt rsa_keygen_bits:2048
+          
+          echo "Extracting public key..."
           openssl rsa -pubout -in keys/private.pem -out keys/public.pem
+          
           chmod 600 keys/private.pem
           
+          echo "✅ Test keys generated successfully!"
+          echo "🔑 Private key: $(file keys/private.pem)"
+          echo "🔓 Public key: $(file keys/public.pem)"
+          echo ""
           echo "⚠️  TEST KEYS GENERATED - NOT FOR PRODUCTION USE!"
 
       - name: Build root filesystem
