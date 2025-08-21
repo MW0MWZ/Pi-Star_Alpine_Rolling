@@ -95,7 +95,8 @@ apk add --no-cache \
     alpine-conf \
     openrc \
     eudev \
-    dbus
+    dbus \
+    sudo
 
 echo "Installing network and time services..."
 apk add --no-cache \
@@ -110,6 +111,14 @@ apk add --no-cache \
     openssl \
     ca-certificates \
     tzdata
+
+echo "Installing WiFi and networking support..."
+apk add --no-cache \
+    wpa_supplicant \
+    wireless-tools \
+    iw \
+    dhcpcd \
+    bridge-utils
 
 echo "Installing Raspberry Pi kernel and modules..."
 apk add --no-cache \
@@ -133,12 +142,9 @@ rc-update add sshd default
 rc-update add chronyd default
 CHROOT_SERVICES
 
-# Create user accounts with enhanced security (replace existing section in build-rootfs.sh)
+# Create secure user accounts
 echo "Creating secure user accounts..."
 sudo chroot . /bin/sh << 'CHROOT_USERS'
-# Install sudo package
-apk add --no-cache sudo
-
 # Lock root account completely (no password, no SSH access)
 passwd -l root
 
@@ -165,20 +171,48 @@ chmod 700 /home/pi-star/.ssh
 echo "pi-star ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/pi-star
 chmod 440 /etc/sudoers.d/pi-star
 
-# Install WiFi and networking packages
-echo "Installing WiFi and networking support..."
-apk add --no-cache \
-    wpa_supplicant \
-    wireless-tools \
-    iw \
-    dhcpcd \
-    bridge-utils
-
 echo "Secure user configuration complete:"
 echo "  root: LOCKED (no password, no SSH access)"
 echo "  pi-star: passwordless sudo, WiFi support"
 echo "  Configuration via /boot/pistar-config.txt"
 CHROOT_USERS
+
+# Configure SSH for security
+echo "Configuring SSH..."
+sudo chroot . /bin/sh << 'CHROOT_SSH'
+# Create SSH host keys
+ssh-keygen -A
+
+# Configure SSH daemon
+cat > /etc/ssh/sshd_config << 'EOF'
+# Pi-Star SSH Configuration - Security Hardened
+Port 22
+Protocol 2
+
+# Security settings - no root login, no password auth by default
+PermitRootLogin no
+PasswordAuthentication no
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+
+# Disable dangerous features
+PermitEmptyPasswords no
+X11Forwarding no
+AllowTcpForwarding no
+
+# Connection settings
+ClientAliveInterval 300
+ClientAliveCountMax 2
+MaxAuthTries 3
+MaxSessions 2
+
+# Logging
+SyslogFacility AUTH
+LogLevel INFO
+EOF
+
+echo "SSH configured with security settings"
+CHROOT_SSH
 
 # Install Pi-Star (placeholder or actual)
 echo "Installing Pi-Star (mode: ${PI_STAR_MODE})..."
@@ -226,6 +260,12 @@ if [ -f "$REPO_ROOT/scripts/partition-switcher.sh" ]; then
     sudo chmod +x usr/local/bin/partition-switcher
 fi
 
+# Install boot configuration processor
+if [ -f "$REPO_ROOT/scripts/process-boot-config.sh" ]; then
+    sudo cp "$REPO_ROOT/scripts/process-boot-config.sh" usr/local/bin/process-boot-config
+    sudo chmod +x usr/local/bin/process-boot-config
+fi
+
 # Copy public key
 if [ -f "$REPO_ROOT/keys/public.pem" ]; then
     sudo cp "$REPO_ROOT/keys/public.pem" etc/pi-star-update-key.pub
@@ -243,44 +283,61 @@ if [ -f "$REPO_ROOT/config/system/hostname" ]; then
     sudo cp "$REPO_ROOT/config/system/hostname" etc/hostname
 fi
 
-# Configure SSH for security
-echo "Configuring SSH..."
-sudo chroot . /bin/sh << 'CHROOT_SSH'
-# Create SSH host keys
-ssh-keygen -A
+# Create enhanced boot config service
+sudo tee etc/init.d/pistar-boot-config << 'SERVICE_EOF'
+#!/sbin/openrc-run
 
-# Configure SSH daemon
-cat > /etc/ssh/sshd_config << 'EOF'
-# Pi-Star SSH Configuration
-Port 22
-Protocol 2
+name="Pi-Star Boot Config"
+description="Process boot partition configuration"
+command="/usr/local/bin/process-boot-config"
 
-# Security settings
-PermitRootLogin yes
-PasswordAuthentication yes
-PubkeyAuthentication yes
-AuthorizedKeysFile .ssh/authorized_keys
+depend() {
+    after localmount
+    after bootmisc
+    before networking
+    before wpa_supplicant
+    before dhcpcd
+    before first-boot
+}
 
-# Disable dangerous features
-PermitEmptyPasswords no
-X11Forwarding no
-AllowTcpForwarding no
+start() {
+    ebegin "Processing Pi-Star boot configuration"
+    $command
+    eend $?
+}
+SERVICE_EOF
 
-# Connection settings
-ClientAliveInterval 300
-ClientAliveCountMax 2
-MaxAuthTries 3
-MaxSessions 2
+sudo chmod +x etc/init.d/pistar-boot-config
 
-# Logging
-SyslogFacility AUTH
-LogLevel INFO
-EOF
+# Create the first-boot service with proper dependencies  
+sudo tee etc/init.d/first-boot << 'FIRST_BOOT_SERVICE'
+#!/sbin/openrc-run
 
-echo "SSH configured with security settings"
-CHROOT_SSH
+name="First Boot Setup"
+description="Pi-Star first boot configuration"
+command="/usr/local/bin/first-boot-setup"
 
-# Create Pi-Star Update services
+depend() {
+    after localmount
+    after bootmisc
+    after pistar-boot-config
+    before networking
+}
+
+start() {
+    if [ ! -f /opt/pistar/.first-boot-complete ]; then
+        ebegin "Running first boot setup"
+        $command
+        eend $?
+    else
+        einfo "First boot already completed, skipping"
+    fi
+}
+FIRST_BOOT_SERVICE
+
+sudo chmod +x etc/init.d/first-boot
+
+# Create services
 sudo tee etc/init.d/pi-star-updater << 'SERVICE_EOF'
 #!/sbin/openrc-run
 
@@ -296,68 +353,30 @@ depend() {
 SERVICE_EOF
 
 sudo chmod +x etc/init.d/pi-star-updater
-sudo chroot . rc-update add pi-star-updater default
-
-# Create Pi-Star Boot Config service
-sudo tee etc/init.d/pistar-boot-config << 'SERVICE_EOF'
-#!/sbin/openrc-run
-name="Pi-Star Boot Config"
-description="Process boot partition configuration"
-command="/usr/local/bin/process-boot-config"
-depend() {
-    after localmount
-    before networking
-}
-SERVICE_EOF
-
-# Create enhanced boot config service
-sudo tee etc/init.d/pistar-boot-config << 'SERVICE_EOF'
-#!/sbin/openrc-run
-
-name="Pi-Star Boot Config"
-description="Process boot partition configuration before network startup"
-command="/usr/local/bin/process-boot-config"
-
-depend() {
-    after localmount
-    before networking
-    before wpa_supplicant
-    before dhcpcd
-}
-
-start() {
-    ebegin "Processing Pi-Star boot configuration"
-    $command
-    eend $?
-}
-SERVICE_EOF
-
-sudo chmod +x etc/init.d/pistar-boot-config
 
 # Enable services in correct order
-echo "Configuring services..."
+echo "Configuring services with proper dependencies..."
 sudo chroot . /bin/sh << 'CHROOT_SERVICES'
-# Boot services
+# Boot-time services (in order)
+rc-update add devfs sysinit
 rc-update add bootmisc boot
+rc-update add localmount boot
+rc-update add pistar-boot-config boot
+rc-update add first-boot boot
 rc-update add hostname boot
 rc-update add modules boot
-rc-update add devfs sysinit
-rc-update add pistar-boot-config boot
 
-# Default services  
+# Default services (after boot is complete)
 rc-update add dbus default
-rc-update add sshd default
 rc-update add chronyd default
 rc-update add networking default
 rc-update add wpa_supplicant default
 rc-update add dhcpcd default
-rc-update add first-boot default
+rc-update add sshd default
+rc-update add pi-star-updater default
 
-echo "Services configured with proper dependencies"
+echo "Services configured with proper boot order"
 CHROOT_SERVICES
-
-sudo chmod +x etc/init.d/pistar-boot-config
-sudo chroot . rc-update add pistar-boot-config boot
 
 # Cleanup
 echo "Cleaning up..."

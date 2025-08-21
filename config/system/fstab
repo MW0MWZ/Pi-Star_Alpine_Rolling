@@ -1,10 +1,10 @@
-# Pi-Star A/B Partition Layout with OS/Pi-Star separation
+# Pi-Star A/B Partition Layout (2GB optimized)
 LABEL=PISTAR_BOOT     /boot           vfat    defaults,noatime                    0 2
 LABEL=PISTAR_DATA     /opt/pistar     ext4    defaults,noatime                    0 2
 
-# Bind mounts for Pi-Star integration (preserves data across OS updates)
+# Bind mounts for Pi-Star integration
 /opt/pistar/config    /etc/pistar     none    bind,nofail                         0 0
-/opt/pistar/data/logs /var/log/pistar none    bind,nofail                         0 0
+/opt/pistar/logs      /var/log/pistar none    bind,nofail                         0 0
 
 # Temporary filesystem
-tmpfs                 /tmp            tmpfs   nodev,nosuid                        0 0
+tmpfs                 /tmp            tmpfs   nodev,nosuid,size=50M               0 0

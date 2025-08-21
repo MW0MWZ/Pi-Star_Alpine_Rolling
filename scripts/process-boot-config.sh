@@ -5,18 +5,25 @@ set -e
 CONFIG_FILE="/boot/pistar-config.txt"
 PROCESSED_FLAG="/boot/.config-processed"
 
-# Exit if already processed this boot
-if [ -f "$PROCESSED_FLAG" ]; then
-    exit 0
-fi
-
-# Exit if no config file exists
-if [ ! -f "$CONFIG_FILE" ]; then
-    echo "No boot configuration found at $CONFIG_FILE"
-    exit 0
-fi
-
-echo "Processing boot configuration from $CONFIG_FILE"
+# Debug function
+debug_boot_config() {
+    echo "=== BOOT CONFIG DEBUG ==="
+    echo "Current time: $(date)"
+    echo "Config file exists: $([ -f "$CONFIG_FILE" ] && echo 'YES' || echo 'NO')"
+    echo "Processed flag exists: $([ -f "$PROCESSED_FLAG" ] && echo 'YES' || echo 'NO')"
+    
+    if [ -f "$CONFIG_FILE" ]; then
+        echo "Config file size: $(wc -l < "$CONFIG_FILE") lines"
+        echo "Config file contents (first 10 lines):"
+        head -10 "$CONFIG_FILE" | sed 's/^/  /'
+    fi
+    
+    echo "Boot partition contents:"
+    ls -la /boot/ | grep -E "(pistar|config|\.txt)" | sed 's/^/  /' || true
+    
+    echo "Process: $$, User: $(whoami), PWD: $(pwd)"
+    echo "========================="
+}
 
 # Initialize variables
 WIFI_NETWORKS=()
@@ -106,6 +113,13 @@ parse_config() {
                 ;;
             "dmr_id")
                 DMR_ID="$value"
+                ;;
+            
+            # Debug flag
+            "DEBUG_BOOT_CONFIG")
+                if [ "$value" = "1" ] || [ "$value" = "true" ]; then
+                    export DEBUG_BOOT_CONFIG=1
+                fi
                 ;;
         esac
     done < "$CONFIG_FILE"
@@ -279,6 +293,27 @@ EOF
 # Main execution
 main() {
     echo "Starting enhanced boot configuration processing"
+    echo "Config file: $CONFIG_FILE"
+    echo "Processed flag: $PROCESSED_FLAG"
+    
+    # Call debug function if environment variable is set
+    if [ "$DEBUG_BOOT_CONFIG" = "1" ]; then
+        debug_boot_config
+    fi
+    
+    # Check if already processed
+    if [ -f "$PROCESSED_FLAG" ]; then
+        echo "Configuration already processed this boot - exiting"
+        exit 0
+    fi
+    
+    # Check if config file exists
+    if [ ! -f "$CONFIG_FILE" ]; then
+        echo "No boot configuration found at $CONFIG_FILE - exiting"
+        exit 0
+    fi
+    
+    echo "Processing configuration file..."
     
     # Parse the configuration file
     parse_config
@@ -291,13 +326,22 @@ main() {
     store_pistar_config
     
     # Mark configuration as processed
+    echo "Marking configuration as processed..."
     touch "$PROCESSED_FLAG"
     
-    echo "Boot configuration processing complete - user prompts will be skipped"
+    echo "Boot configuration processing complete"
+    echo "Processed flag created: $PROCESSED_FLAG"
     echo "Configuration applied from: $CONFIG_FILE"
     
-    # Optionally remove the config file for security (uncomment if desired)
-    # rm -f "$CONFIG_FILE"
+    # List what was actually configured
+    echo ""
+    echo "CONFIGURATION SUMMARY:"
+    [ -n "$HOSTNAME" ] && echo "• Hostname: $HOSTNAME"
+    [ ${#WIFI_NETWORKS[@]} -gt 0 ] && echo "• WiFi networks: ${#WIFI_NETWORKS[@]} configured"
+    [ -n "$USER_PASSWORD" ] && echo "• User password: Set"
+    [ -n "$SSH_KEY" ] && echo "• SSH key: Configured"
+    [ -n "$TIMEZONE" ] && echo "• Timezone: $TIMEZONE"
+    echo ""
 }
 
 # Run main function
