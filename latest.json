@@ -1,9 +1,9 @@
 {
-  "latest_version": "0.0.1-alpha21",
-  "download_url": "https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling/releases/download/v0.0.1-alpha21/pi-star-0.0.1-alpha21.tar.gz",
-  "signature_url": "https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling/releases/download/v0.0.1-alpha21/pi-star-0.0.1-alpha21.tar.gz.sig",
-  "checksum": "9a0ef85fe6c687a512913835632c2d746262a4a94b00de69b771ae2f6496c5c3",
-  "release_date": "2025-08-21T13:01:05Z",
+  "latest_version": "0.0.1-alpha22",
+  "download_url": "https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling/releases/download/v0.0.1-alpha22/pi-star-0.0.1-alpha22.tar.gz",
+  "signature_url": "https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling/releases/download/v0.0.1-alpha22/pi-star-0.0.1-alpha22.tar.gz.sig",
+  "checksum": "2cabe64fd2c75dd15660f18656d64205d340348d7f51f576e61c2feaca434d94",
+  "release_date": "2025-08-21T13:18:35Z",
   "min_version": "2024.01.01",
   "alpine_version": "3.22",
   "architecture": "armhf"
