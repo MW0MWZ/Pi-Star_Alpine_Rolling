@@ -122,42 +122,121 @@ apk add --no-cache \
     bridge-utils
 
 echo "Installing PURE ALPINE Raspberry Pi support..."
-# PURE ALPINE: Only use Alpine's Pi packages
+# PURE ALPINE: Only use Alpine's Pi packages that actually exist
+
+# Install kernel first
+echo "Installing Alpine Raspberry Pi kernel..."
+apk add --no-cache linux-rpi
+
+# Install firmware packages (excluding non-existent ones)
+echo "Installing Alpine firmware packages..."
 apk add --no-cache \
-    linux-rpi \
     linux-firmware \
     linux-firmware-brcm \
-    linux-firmware-cypress \
-    linux-firmware-ath9k
+    linux-firmware-cypress
+
+# Note: linux-firmware-ath9k doesn't exist in Alpine 3.22, skipping
 
 echo "Pure Alpine Pi packages installed - no Pi Foundation kernel mixing"
+
+# CRITICAL FIX: Trigger kernel installation and copy files
+echo "Setting up Alpine kernel for export..."
+
+# Force update initramfs to ensure kernel is properly installed
+if command -v mkinitfs >/dev/null 2>&1; then
+    echo "Updating initramfs..."
+    # Get kernel version from modules
+    if [ -d /lib/modules ]; then
+        KERNEL_VERSION=$(ls /lib/modules | head -1)
+        if [ -n "$KERNEL_VERSION" ]; then
+            echo "Found kernel version: $KERNEL_VERSION"
+            mkinitfs -o /boot/initramfs-${KERNEL_VERSION} ${KERNEL_VERSION} || true
+        fi
+    fi
+else
+    echo "mkinitfs not available, installing..."
+    apk add --no-cache mkinitfs
+    
+    # Try again with mkinitfs installed
+    if [ -d /lib/modules ]; then
+        KERNEL_VERSION=$(ls /lib/modules | head -1)
+        if [ -n "$KERNEL_VERSION" ]; then
+            echo "Creating initramfs for kernel: $KERNEL_VERSION"
+            mkinitfs -o /boot/initramfs-${KERNEL_VERSION} ${KERNEL_VERSION} || true
+        fi
+    fi
+fi
+
+# Verify kernel installation
+echo "Verifying Alpine kernel installation..."
+echo "Boot directory contents:"
+ls -la /boot/ || echo "Boot directory empty or missing"
+
+echo "Modules directory contents:"
+ls -la /lib/modules/ || echo "Modules directory empty or missing"
 
 # CRITICAL FIX: Copy kernel files to accessible location for SD image build
 echo "Copying Alpine kernel files for SD image build..."
 mkdir -p /tmp/kernel-export
 
-# Copy kernel files to a location accessible outside chroot
-if [ -f /boot/vmlinuz-* ]; then
+# Copy kernel files if they exist
+KERNEL_FOUND=false
+if ls /boot/vmlinuz-* >/dev/null 2>&1; then
     cp /boot/vmlinuz-* /tmp/kernel-export/
-    echo "Kernel exported: $(ls /boot/vmlinuz-*)"
+    echo "✅ Kernel exported: $(ls /boot/vmlinuz-*)"
+    KERNEL_FOUND=true
 else
-    echo "Warning: No kernel found in /boot/ yet"
+    echo "❌ No kernel found in /boot/"
 fi
 
-if [ -f /boot/initramfs-* ]; then
+if ls /boot/initramfs-* >/dev/null 2>&1; then
     cp /boot/initramfs-* /tmp/kernel-export/
-    echo "Initramfs exported: $(ls /boot/initramfs-*)"
+    echo "✅ Initramfs exported: $(ls /boot/initramfs-*)"
 else
-    echo "Warning: No initramfs found in /boot/"
+    echo "⚠️  No initramfs found in /boot/"
 fi
 
-# Also export module information
+# Export module information
 if [ -d /lib/modules ]; then
     ls /lib/modules > /tmp/kernel-export/module-versions.txt
-    echo "Module versions exported: $(cat /tmp/kernel-export/module-versions.txt)"
+    echo "✅ Module versions exported: $(cat /tmp/kernel-export/module-versions.txt)"
+else
+    echo "❌ No modules directory found"
 fi
 
-echo "Kernel files exported to /tmp/kernel-export for SD image build"
+# If no kernel was found, try to locate it elsewhere
+if [ "$KERNEL_FOUND" = "false" ]; then
+    echo "🔍 Searching for kernel files in alternative locations..."
+    
+    # Search for any kernel-related files
+    find / -name "vmlinuz*" -type f 2>/dev/null | head -5 | while read kernel_file; do
+        echo "Found kernel file: $kernel_file"
+        cp "$kernel_file" /tmp/kernel-export/ 2>/dev/null || true
+    done
+    
+    find / -name "bzImage*" -type f 2>/dev/null | head -5 | while read kernel_file; do
+        echo "Found kernel image: $kernel_file"
+        cp "$kernel_file" /tmp/kernel-export/ 2>/dev/null || true
+    done
+    
+    # Check if we found anything
+    if ls /tmp/kernel-export/vmlinuz* >/dev/null 2>&1 || ls /tmp/kernel-export/bzImage* >/dev/null 2>&1; then
+        echo "✅ Found kernel files in alternative locations"
+        KERNEL_FOUND=true
+    fi
+fi
+
+# Final check
+if [ "$KERNEL_FOUND" = "true" ]; then
+    echo "✅ Kernel files successfully exported to /tmp/kernel-export"
+    ls -la /tmp/kernel-export/
+else
+    echo "⚠️  WARNING: No kernel files found - SD image build may need fallback method"
+    # Create a marker file to indicate we need to download kernel
+    echo "no_kernel_found" > /tmp/kernel-export/download_needed.txt
+fi
+
+echo "Kernel export process complete"
 CHROOT_PACKAGES
 
 # CRITICAL FIX: Copy exported kernel files outside the chroot
@@ -165,23 +244,33 @@ echo "=== EXPORTING ALPINE KERNEL FILES ==="
 if [ -d "$BUILD_DIR/rootfs/tmp/kernel-export" ]; then
     echo "Found exported kernel files, copying to build directory..."
     mkdir -p "$BUILD_DIR/kernel-files"
-    cp -r "$BUILD_DIR/rootfs/tmp/kernel-export"/* "$BUILD_DIR/kernel-files/"
     
-    echo "Exported kernel files:"
-    ls -la "$BUILD_DIR/kernel-files/"
-    
-    # Also create symlinks in rootfs/boot for compatibility
-    mkdir -p "$BUILD_DIR/rootfs/boot"
-    if [ -f "$BUILD_DIR/kernel-files/vmlinuz-"* ]; then
-        cp "$BUILD_DIR/kernel-files"/vmlinuz-* "$BUILD_DIR/rootfs/boot/"
-        echo "Kernel copied to rootfs/boot for compatibility"
-    fi
-    if [ -f "$BUILD_DIR/kernel-files/initramfs-"* ]; then
-        cp "$BUILD_DIR/kernel-files"/initramfs-* "$BUILD_DIR/rootfs/boot/"
-        echo "Initramfs copied to rootfs/boot for compatibility"
+    # Copy files, handling the case where no files exist
+    if ls "$BUILD_DIR/rootfs/tmp/kernel-export"/* >/dev/null 2>&1; then
+        cp "$BUILD_DIR/rootfs/tmp/kernel-export"/* "$BUILD_DIR/kernel-files/"
+        
+        echo "Exported kernel files:"
+        ls -la "$BUILD_DIR/kernel-files/"
+        
+        # Also create symlinks in rootfs/boot for compatibility
+        mkdir -p "$BUILD_DIR/rootfs/boot"
+        if ls "$BUILD_DIR/kernel-files"/vmlinuz-* >/dev/null 2>&1; then
+            cp "$BUILD_DIR/kernel-files"/vmlinuz-* "$BUILD_DIR/rootfs/boot/"
+            echo "✅ Kernel copied to rootfs/boot for compatibility"
+        fi
+        if ls "$BUILD_DIR/kernel-files"/initramfs-* >/dev/null 2>&1; then
+            cp "$BUILD_DIR/kernel-files"/initramfs-* "$BUILD_DIR/rootfs/boot/"
+            echo "✅ Initramfs copied to rootfs/boot for compatibility"
+        fi
+    else
+        echo "⚠️  No kernel files found in export directory"
+        # Create marker for SD image build to use fallback
+        echo "no_kernel_found" > "$BUILD_DIR/kernel-files/download_needed.txt"
     fi
 else
-    echo "Warning: No kernel files were exported from chroot"
+    echo "⚠️  No kernel export directory found - creating fallback marker"
+    mkdir -p "$BUILD_DIR/kernel-files"
+    echo "no_kernel_found" > "$BUILD_DIR/kernel-files/download_needed.txt"
 fi
 
 # PURE ALPINE: Download comprehensive Pi firmware for ALL models

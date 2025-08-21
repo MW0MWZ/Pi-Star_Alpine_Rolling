@@ -150,10 +150,10 @@ if [ -z "$ALPINE_KERNEL" ] && [ -d "$ROOTFS_PATH/boot" ]; then
     fi
 fi
 
-# Method 3: Download Alpine kernel directly if still not found
-if [ -z "$ALPINE_KERNEL" ]; then
-    echo "WARNING: Alpine kernel not found in rootfs, downloading directly..."
-    echo "This fallback method downloads a compatible Alpine kernel"
+# Method 3: Download Alpine kernel directly if needed (enhanced fallback)
+if [ -z "$ALPINE_KERNEL" ] || [ -f "$KERNEL_FILES_PATH/download_needed.txt" ]; then
+    echo "🔄 Alpine kernel not found locally - downloading directly from Alpine repository..."
+    echo "This fallback method downloads a compatible Alpine kernel for armhf"
     
     mkdir -p kernel-download
     cd kernel-download
@@ -161,40 +161,89 @@ if [ -z "$ALPINE_KERNEL" ]; then
     # Download Alpine kernel package for armhf
     ALPINE_VERSION="${ALPINE_VERSION:-3.22}"
     
-    echo "Downloading Alpine kernel package..."
+    echo "Downloading Alpine package index..."
     if wget "https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/main/armhf/APKINDEX.tar.gz" -O APKINDEX.tar.gz; then
         # Extract package index
         tar -xzf APKINDEX.tar.gz
         
-        # Find kernel package
-        KERNEL_PKG=$(grep -A 5 "P:linux-rpi" APKINDEX | grep "V:" | head -1 | cut -d: -f2)
-        if [ -n "$KERNEL_PKG" ]; then
-            echo "Found Alpine kernel version: $KERNEL_PKG"
+        # Find kernel package information
+        echo "Searching for linux-rpi package..."
+        
+        # Extract package info for linux-rpi
+        if grep -A 20 "P:linux-rpi$" APKINDEX > kernel_info.txt; then
+            KERNEL_PKG_VERSION=$(grep "V:" kernel_info.txt | head -1 | cut -d: -f2)
+            echo "Found Alpine linux-rpi version: $KERNEL_PKG_VERSION"
             
-            # Download and extract kernel package
-            PKG_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/main/armhf/linux-rpi-${KERNEL_PKG}.apk"
-            echo "Downloading: $PKG_URL"
-            
-            if wget "$PKG_URL" -O kernel.apk; then
-                # Extract kernel from apk (it's just a tar.gz)
-                tar -xzf kernel.apk
+            if [ -n "$KERNEL_PKG_VERSION" ]; then
+                # Download and extract kernel package
+                PKG_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/main/armhf/linux-rpi-${KERNEL_PKG_VERSION}.apk"
+                echo "Downloading kernel package: $PKG_URL"
                 
-                # Find kernel files
-                ALPINE_KERNEL=$(find . -name "vmlinuz-*" -type f | head -1)
-                ALPINE_INITRD=$(find . -name "initramfs-*" -type f | head -1)
-                
-                if [ -n "$ALPINE_KERNEL" ]; then
-                    # Convert to absolute path
-                    ALPINE_KERNEL=$(cd "$(dirname "$ALPINE_KERNEL")" && pwd)/$(basename "$ALPINE_KERNEL")
-                    echo "Downloaded Alpine kernel: $ALPINE_KERNEL"
+                if wget "$PKG_URL" -O linux-rpi.apk; then
+                    echo "✅ Downloaded linux-rpi package successfully"
+                    
+                    # Extract kernel from apk (it's a tar.gz file)
+                    echo "Extracting kernel files from package..."
+                    tar -xzf linux-rpi.apk
+                    
+                    # Find kernel files in extracted package
+                    ALPINE_KERNEL=$(find . -name "vmlinuz*" -type f | head -1)
+                    
+                    if [ -n "$ALPINE_KERNEL" ]; then
+                        # Convert to absolute path
+                        ALPINE_KERNEL=$(cd "$(dirname "$ALPINE_KERNEL")" && pwd)/$(basename "$ALPINE_KERNEL")
+                        echo "✅ Found Alpine kernel in package: $ALPINE_KERNEL"
+                        
+                        # Look for initramfs too
+                        ALPINE_INITRD=$(find . -name "initramfs*" -type f | head -1)
+                        if [ -n "$ALPINE_INITRD" ]; then
+                            ALPINE_INITRD=$(cd "$(dirname "$ALPINE_INITRD")" && pwd)/$(basename "$ALPINE_INITRD")
+                            echo "✅ Found Alpine initramfs: $ALPINE_INITRD"
+                        fi
+                        
+                        # Also try to extract kernel version info
+                        if find . -name "*.ko" >/dev/null 2>&1; then
+                            echo "✅ Found kernel modules in package"
+                        fi
+                    else
+                        echo "❌ No vmlinuz found in downloaded package"
+                        echo "Package contents:"
+                        find . -type f | head -20
+                    fi
+                else
+                    echo "❌ Failed to download kernel package from $PKG_URL"
                 fi
+            else
+                echo "❌ Could not determine kernel package version"
+            fi
+        else
+            echo "❌ linux-rpi package not found in Alpine repository"
+        fi
+        
+        # Fallback: try other kernel packages
+        if [ -z "$ALPINE_KERNEL" ]; then
+            echo "🔄 Trying alternative kernel packages..."
+            
+            # Try linux-lts (Long Term Support kernel)
+            if grep -A 20 "P:linux-lts$" APKINDEX > lts_info.txt; then
+                LTS_VERSION=$(grep "V:" lts_info.txt | head -1 | cut -d: -f2)
+                echo "Found linux-lts version: $LTS_VERSION"
                 
-                if [ -n "$ALPINE_INITRD" ]; then
-                    ALPINE_INITRD=$(cd "$(dirname "$ALPINE_INITRD")" && pwd)/$(basename "$ALPINE_INITRD")
-                    echo "Downloaded Alpine initrd: $ALPINE_INITRD"
+                LTS_URL="https://dl-cdn.alpinelinux.org/alpine/v${ALPINE_VERSION}/main/armhf/linux-lts-${LTS_VERSION}.apk"
+                echo "Trying LTS kernel: $LTS_URL"
+                
+                if wget "$LTS_URL" -O linux-lts.apk; then
+                    tar -xzf linux-lts.apk
+                    ALPINE_KERNEL=$(find . -name "vmlinuz*" -type f | head -1)
+                    if [ -n "$ALPINE_KERNEL" ]; then
+                        ALPINE_KERNEL=$(cd "$(dirname "$ALPINE_KERNEL")" && pwd)/$(basename "$ALPINE_KERNEL")
+                        echo "✅ Using LTS kernel: $ALPINE_KERNEL"
+                    fi
                 fi
             fi
         fi
+    else
+        echo "❌ Failed to download Alpine package index"
     fi
     
     cd ..
