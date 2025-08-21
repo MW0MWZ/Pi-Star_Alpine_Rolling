@@ -112,7 +112,7 @@ jobs:
           sudo -E ./build/build-sd-image.sh "${{ steps.version.outputs.VERSION }}" "pi-star-${{ steps.version.outputs.VERSION }}.img"
         env:
           BUILD_DIR: /tmp/pi-star-image-build
-          GITHUB_WORKSPACE: ${{ github.workspace }}  # Pass Alpine version to build script
+          GITHUB_WORKSPACE: ${{ github.workspace }}
 
       - name: Create package-update.sh if missing
         run: |
@@ -213,6 +213,13 @@ jobs:
             /tmp/pi-star-image-build/pi-star-${{ steps.version.outputs.VERSION }}.img.gz
           retention-days: 90
 
+      - name: Set build date
+        id: build_date
+        run: |
+          BUILD_DATE=$(date -u +%Y-%m-%d)
+          echo "DATE=$BUILD_DATE" >> $GITHUB_OUTPUT
+          echo "Build date: $BUILD_DATE"
+
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
@@ -230,7 +237,7 @@ jobs:
             - Pi-Star Mode: ${{ github.event.inputs.pi_star_mode || 'placeholder' }}
             - Architecture: ${{ env.BUILD_ARCH }}
             - Alpine Version: ${{ env.ALPINE_VERSION }}
-            - Build Date: $(date -u +%Y-%m-%d)
+            - Build Date: ${{ steps.build_date.outputs.DATE }}
             
             **Files:**
             - `pi-star-${{ steps.version.outputs.VERSION }}.tar.gz` - Update package for existing installations (OTA)
@@ -242,7 +249,7 @@ jobs:
             
             *For new installations:*
             ```bash
-            # Download and flash SD card image (4GB+ SD card required)
+            # Download and flash SD card image (2GB+ SD card required)
             wget https://github.com/${{ github.repository }}/releases/download/v${{ steps.version.outputs.VERSION }}/pi-star-${{ steps.version.outputs.VERSION }}.img.gz
             gunzip -c pi-star-${{ steps.version.outputs.VERSION }}.img.gz | sudo dd of=/dev/sdX bs=4M status=progress
             ```
@@ -303,7 +310,7 @@ jobs:
             
             ---
             
-            📡 **Update Server:** https://mw0mwz.github.io/Pi-Star_Alpine_Rolling/
+            📡 **Update Server:** https://version.pistar.uk
             
             🔧 **Repository:** https://github.com/${{ github.repository }}
         env:

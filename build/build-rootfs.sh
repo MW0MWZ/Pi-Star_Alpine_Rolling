@@ -130,8 +130,8 @@ apk add --no-cache \
 echo "Package installation complete"
 CHROOT_PACKAGES
 
-# Enable essential services
-echo "Configuring services..."
+# Enable essential services (basic setup only)
+echo "Configuring basic services..."
 sudo chroot . /bin/sh << 'CHROOT_SERVICES'
 rc-update add bootmisc boot
 rc-update add hostname boot
@@ -337,7 +337,7 @@ FIRST_BOOT_SERVICE
 
 sudo chmod +x etc/init.d/first-boot
 
-# Create services
+# Create updater service
 sudo tee etc/init.d/pi-star-updater << 'SERVICE_EOF'
 #!/sbin/openrc-run
 
@@ -354,10 +354,10 @@ SERVICE_EOF
 
 sudo chmod +x etc/init.d/pi-star-updater
 
-# Enable services in correct order
+# Enable all services in correct order - SINGLE UNIFIED CONFIGURATION
 echo "Configuring services with proper dependencies..."
-sudo chroot . /bin/sh << 'CHROOT_SERVICES'
-# Boot-time services (in order)
+sudo chroot . /bin/sh << 'CHROOT_SERVICES_FINAL'
+# Boot-time services (in correct dependency order)
 rc-update add devfs sysinit
 rc-update add bootmisc boot
 rc-update add localmount boot
@@ -375,8 +375,33 @@ rc-update add dhcpcd default
 rc-update add sshd default
 rc-update add pi-star-updater default
 
+# Verify the critical boot service order
+echo "=== BOOT SERVICE VERIFICATION ==="
+echo "Boot services enabled:"
+rc-update show boot | grep -E "(localmount|pistar-boot-config|first-boot|hostname)"
+echo "================================="
+
 echo "Services configured with proper boot order"
-CHROOT_SERVICES
+CHROOT_SERVICES_FINAL
+
+# Add final verification debug section
+echo "=== FINAL BUILD VERIFICATION ==="
+echo "Repository root: $REPO_ROOT"
+
+echo "Scripts installed:"
+ls -la usr/local/bin/ | grep -E "(process-boot-config|first-boot-setup|update-daemon|install-update)" || echo "❌ Scripts missing"
+
+echo "Service files created:"
+ls -la etc/init.d/ | grep -E "(pistar-boot-config|first-boot)" || echo "❌ Services missing"
+
+echo "Boot services enabled:"
+sudo chroot . rc-update show boot | grep -E "(pistar-boot-config|first-boot)" || echo "❌ Boot services not enabled"
+
+echo "System files:"
+[ -f etc/fstab ] && echo "✅ fstab exists" || echo "❌ fstab missing"
+[ -f etc/pi-star-version ] && echo "✅ version file exists" || echo "❌ version file missing"
+
+echo "================================="
 
 # Cleanup
 echo "Cleaning up..."
