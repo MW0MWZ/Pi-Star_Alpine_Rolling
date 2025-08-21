@@ -152,44 +152,24 @@ echo "✅ Ultra-minimal WiFi-only firmware installed"
 echo "✅ Bluetooth firmware skipped - smaller image, faster boot"
 echo "Pure Alpine Pi packages installed - no Pi Foundation kernel mixing"
 
-# CRITICAL FIX: Trigger kernel installation and copy files
+# CRITICAL FIX: Export kernel files inside chroot, then copy outside
 echo "Setting up Alpine kernel for export..."
-
-# Force update initramfs to ensure kernel is properly installed
-if command -v mkinitfs >/dev/null 2>&1; then
-    echo "Updating initramfs..."
-    # Get kernel version from modules
-    if [ -d /lib/modules ]; then
-        KERNEL_VERSION=$(ls /lib/modules | head -1)
-        if [ -n "$KERNEL_VERSION" ]; then
-            echo "Found kernel version: $KERNEL_VERSION"
-            mkinitfs -o /boot/initramfs-${KERNEL_VERSION} ${KERNEL_VERSION} || true
-        fi
-    fi
-else
-    echo "mkinitfs not available, installing..."
+sudo chroot . /bin/sh << 'CHROOT_KERNEL_EXPORT'
+# Ensure mkinitfs is available (should already be installed with linux-rpi)
+if ! command -v mkinitfs >/dev/null 2>&1; then
+    echo "Installing mkinitfs..."
     apk add --no-cache mkinitfs
-    
-    # Try again with mkinitfs installed
-    if [ -d /lib/modules ]; then
-        KERNEL_VERSION=$(ls /lib/modules | head -1)
-        if [ -n "$KERNEL_VERSION" ]; then
-            echo "Creating initramfs for kernel: $KERNEL_VERSION"
-            mkinitfs -o /boot/initramfs-${KERNEL_VERSION} ${KERNEL_VERSION} || true
-        fi
-    fi
 fi
 
-# Verify kernel installation
-echo "Verifying Alpine kernel installation..."
+# Check current kernel/initramfs status
+echo "Checking Alpine kernel installation..."
 echo "Boot directory contents:"
 ls -la /boot/ || echo "Boot directory empty or missing"
 
 echo "Modules directory contents:"
 ls -la /lib/modules/ || echo "Modules directory empty or missing"
 
-# CRITICAL FIX: Copy kernel files to accessible location for SD image build
-echo "Copying Alpine kernel files for SD image build..."
+# Create kernel export directory
 mkdir -p /tmp/kernel-export
 
 # Copy kernel files if they exist
@@ -217,39 +197,17 @@ else
     echo "❌ No modules directory found"
 fi
 
-# If no kernel was found, try to locate it elsewhere
-if [ "$KERNEL_FOUND" = "false" ]; then
-    echo "🔍 Searching for kernel files in alternative locations..."
-    
-    # Search for any kernel-related files
-    find / -name "vmlinuz*" -type f 2>/dev/null | head -5 | while read kernel_file; do
-        echo "Found kernel file: $kernel_file"
-        cp "$kernel_file" /tmp/kernel-export/ 2>/dev/null || true
-    done
-    
-    find / -name "bzImage*" -type f 2>/dev/null | head -5 | while read kernel_file; do
-        echo "Found kernel image: $kernel_file"
-        cp "$kernel_file" /tmp/kernel-export/ 2>/dev/null || true
-    done
-    
-    # Check if we found anything
-    if ls /tmp/kernel-export/vmlinuz* >/dev/null 2>&1 || ls /tmp/kernel-export/bzImage* >/dev/null 2>&1; then
-        echo "✅ Found kernel files in alternative locations"
-        KERNEL_FOUND=true
-    fi
-fi
-
-# Final check
+# Final status
 if [ "$KERNEL_FOUND" = "true" ]; then
     echo "✅ Kernel files successfully exported to /tmp/kernel-export"
     ls -la /tmp/kernel-export/
 else
-    echo "⚠️  WARNING: No kernel files found - SD image build may need fallback method"
-    # Create a marker file to indicate we need to download kernel
+    echo "⚠️  WARNING: No kernel files found - will use fallback method"
     echo "no_kernel_found" > /tmp/kernel-export/download_needed.txt
 fi
 
 echo "Kernel export process complete"
+CHROOT_KERNEL_EXPORT
 CHROOT_PACKAGES
 
 # CRITICAL FIX: Copy exported kernel files outside the chroot
