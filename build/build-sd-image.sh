@@ -249,12 +249,35 @@ EOF
     echo "⚠️  Fallback boot setup complete (may not boot without proper firmware)"
 }
 
+# =====================================================
+# INSTALL ROOT FILESYSTEMS FIRST
+# =====================================================
+
+echo "📦 Installing Alpine rootfs to partitions..."
+
+if [ -d "$ROOTFS_PATH" ]; then
+    # Install to partition A
+    cp -a "$ROOTFS_PATH"/* mnt/root-a/
+    echo "✅ Installed Alpine rootfs to partition A"
+    
+    # Install to partition B (identical copy)
+    cp -a mnt/root-a/* mnt/root-b/
+    echo "✅ Installed Alpine rootfs to partition B"
+else
+    echo "❌ Rootfs directory not found"
+    exit 1
+fi
+
+# =====================================================
+# NOW SETUP RASPBERRYPI OS BOOT AND MODULES
+# =====================================================
+
 echo "🔧 Setting up RaspberryPi OS boot partition..."
 # Try to get complete RaspberryPi OS boot
 if setup_raspios_boot "mnt/boot"; then
     echo "✅ RaspberryPi OS boot setup successful"
     
-    # Also get the modules for Alpine userland
+    # Now that Alpine rootfs is installed, add the RaspberryPi OS modules
     if setup_raspios_modules "mnt/root-a" "mnt/root-b"; then
         echo "✅ RaspberryPi OS modules setup successful"
     else
@@ -358,25 +381,6 @@ dtparam=uart0=on
 dtparam=uart1=on
 temp_limit=75
 EOF
-
-# =====================================================
-# INSTALL ROOT FILESYSTEMS
-# =====================================================
-
-echo "📦 Installing Alpine+RaspberryPi OS hybrid to partitions..."
-
-if [ -d "$ROOTFS_PATH" ]; then
-    # Install to partition A
-    cp -a "$ROOTFS_PATH"/* mnt/root-a/
-    echo "✅ Installed to partition A"
-    
-    # Install to partition B (identical copy)
-    cp -a mnt/root-a/* mnt/root-b/
-    echo "✅ Installed to partition B"
-else
-    echo "❌ Rootfs directory not found"
-    exit 1
-fi
 
 # =====================================================
 # SET UP DATA PARTITION
