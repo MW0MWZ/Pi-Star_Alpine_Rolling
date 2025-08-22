@@ -158,68 +158,126 @@ setup_raspios_boot() {
     fi
 }
 
-# Download RaspberryPi OS modules for userland
-setup_raspios_modules() {
-    local rootfs_a="$1"
-    local rootfs_b="$2"
+# Download and extract RaspberryPi OS once, use for both boot and modules
+download_and_extract_raspios() {
+    local boot_dest="$1"
+    local root_a_dest="$2" 
+    local root_b_dest="$3"
     
-    echo "📦 Setting up RaspberryPi OS kernel modules..."
+    echo "🥧 Downloading and extracting RaspberryPi OS for boot and modules..."
     
-    TEMP_DIR=$(mktemp -d)
-    cd "$TEMP_DIR"
+    # Use a separate working directory to avoid conflicts
+    RASPIOS_WORK_DIR="/tmp/raspios-extract-$"
+    mkdir -p "$RASPIOS_WORK_DIR"
+    cd "$RASPIOS_WORK_DIR"
     
-    # Same RaspberryPi OS image
+    # Download RaspberryPi OS Lite
     RASPIOS_URL="https://downloads.raspberrypi.org/raspios_lite_armhf/images/raspios_lite_armhf-2024-07-04/2024-07-04-raspios-bookworm-armhf-lite.img.xz"
     
-    if wget -q --show-progress "$RASPIOS_URL" -O raspios.img.xz; then
-        xz -d raspios.img.xz
-        
-        LOOP_DEV=$(losetup -f)
-        losetup "$LOOP_DEV" raspios.img
-        partprobe "$LOOP_DEV"
-        sleep 2
-        
-        mkdir -p raspios_root
-        mount "${LOOP_DEV}p2" raspios_root
-        
-        echo "📋 Copying kernel modules to both partitions..."
-        
-        # Copy modules to both root partitions
-        if [ -d "raspios_root/lib/modules" ]; then
-            cp -r raspios_root/lib/modules "$rootfs_a/lib/"
-            cp -r raspios_root/lib/modules "$rootfs_b/lib/"
-            echo "✅ Modules copied to partition A and B"
-        fi
-        
-        # Copy firmware (especially for WiFi)
-        if [ -d "raspios_root/lib/firmware" ]; then
-            cp -r raspios_root/lib/firmware "$rootfs_a/lib/"
-            cp -r raspios_root/lib/firmware "$rootfs_b/lib/"
-            echo "✅ Firmware copied to partition A and B"
-        fi
-        
-        # Get the kernel version for reference
-        KERNEL_VERSION=$(ls raspios_root/lib/modules/ | head -1)
-        echo "📱 RaspberryPi OS kernel version: $KERNEL_VERSION"
-        
-        # Create kernel version files for reference
-        echo "$KERNEL_VERSION" > "$rootfs_a/etc/raspios-kernel-version"
-        echo "$KERNEL_VERSION" > "$rootfs_b/etc/raspios-kernel-version"
-        
-        umount raspios_root
-        losetup -d "$LOOP_DEV"
-        
-        echo "✅ RaspberryPi OS modules setup complete"
-        
+    echo "📥 Downloading RaspberryPi OS (this will take a few minutes)..."
+    if ! wget -q -O raspios.img.xz "$RASPIOS_URL"; then
+        echo "❌ Failed to download RaspberryPi OS"
         cd - > /dev/null
-        rm -rf "$TEMP_DIR"
-        return 0
-    else
-        echo "❌ Failed to download RaspberryPi OS for modules"
-        cd - > /dev/null
-        rm -rf "$TEMP_DIR"
+        rm -rf "$RASPIOS_WORK_DIR"
         return 1
     fi
+    
+    echo "📦 Extracting RaspberryPi OS image..."
+    if ! xz -d raspios.img.xz; then
+        echo "❌ Failed to extract RaspberryPi OS image"
+        cd - > /dev/null
+        rm -rf "$RASPIOS_WORK_DIR"
+        return 1
+    fi
+    
+    echo "🔗 Setting up loop device for RaspberryPi OS..."
+    # Find an available loop device (avoid conflicts with main build)
+    RASPIOS_LOOP=$(losetup -f)
+    if ! losetup "$RASPIOS_LOOP" raspios.img; then
+        echo "❌ Failed to attach loop device"
+        cd - > /dev/null
+        rm -rf "$RASPIOS_WORK_DIR"
+        return 1
+    fi
+    
+    # Force partition table re-read and wait
+    partprobe "$RASPIOS_LOOP"
+    sleep 3
+    
+    # Verify partitions exist
+    if [ ! -e "${RASPIOS_LOOP}p1" ] || [ ! -e "${RASPIOS_LOOP}p2" ]; then
+        echo "❌ RaspberryPi OS partitions not detected"
+        echo "Available devices:"
+        ls -la /dev/loop* || true
+        losetup -d "$RASPIOS_LOOP"
+        cd - > /dev/null
+        rm -rf "$RASPIOS_WORK_DIR"
+        return 1
+    fi
+    
+    echo "✅ RaspberryPi OS partitions detected: ${RASPIOS_LOOP}p1 (boot), ${RASPIOS_LOOP}p2 (root)"
+    
+    # Mount and extract boot partition
+    mkdir -p raspios_boot
+    if mount "${RASPIOS_LOOP}p1" raspios_boot; then
+        echo "📋 Copying boot files from RaspberryPi OS..."
+        cp -r raspios_boot/* "$boot_dest/"
+        BOOT_FILE_COUNT=$(ls -1 raspios_boot/ | wc -l)
+        echo "✅ Copied $BOOT_FILE_COUNT boot files"
+        umount raspios_boot
+    else
+        echo "❌ Failed to mount RaspberryPi OS boot partition"
+        losetup -d "$RASPIOS_LOOP"
+        cd - > /dev/null
+        rm -rf "$RASPIOS_WORK_DIR"
+        return 1
+    fi
+    
+    # Mount and extract root partition for modules/firmware
+    mkdir -p raspios_root
+    if mount "${RASPIOS_LOOP}p2" raspios_root; then
+        echo "📋 Copying kernel modules and firmware..."
+        
+        # Copy modules to both Alpine partitions
+        if [ -d "raspios_root/lib/modules" ]; then
+            cp -r raspios_root/lib/modules "$root_a_dest/lib/" 2>/dev/null && echo "✅ Modules copied to partition A" || echo "❌ Failed to copy modules to partition A"
+            cp -r raspios_root/lib/modules "$root_b_dest/lib/" 2>/dev/null && echo "✅ Modules copied to partition B" || echo "❌ Failed to copy modules to partition B"
+        else
+            echo "⚠️  No modules directory found in RaspberryPi OS"
+        fi
+        
+        # Copy firmware to both Alpine partitions  
+        if [ -d "raspios_root/lib/firmware" ]; then
+            cp -r raspios_root/lib/firmware "$root_a_dest/lib/" 2>/dev/null && echo "✅ Firmware copied to partition A" || echo "❌ Failed to copy firmware to partition A"
+            cp -r raspios_root/lib/firmware "$root_b_dest/lib/" 2>/dev/null && echo "✅ Firmware copied to partition B" || echo "❌ Failed to copy firmware to partition B"
+        else
+            echo "⚠️  No firmware directory found in RaspberryPi OS"
+        fi
+        
+        # Get kernel version for reference
+        if [ -d "raspios_root/lib/modules" ]; then
+            KERNEL_VERSION=$(ls raspios_root/lib/modules/ | head -1)
+            echo "📱 RaspberryPi OS kernel version: $KERNEL_VERSION"
+            echo "$KERNEL_VERSION" > "$root_a_dest/etc/raspios-kernel-version" 2>/dev/null || true
+            echo "$KERNEL_VERSION" > "$root_b_dest/etc/raspios-kernel-version" 2>/dev/null || true
+        fi
+        
+        umount raspios_root
+    else
+        echo "❌ Failed to mount RaspberryPi OS root partition"
+        losetup -d "$RASPIOS_LOOP"
+        cd - > /dev/null
+        rm -rf "$RASPIOS_WORK_DIR"
+        return 1
+    fi
+    
+    # Cleanup
+    losetup -d "$RASPIOS_LOOP"
+    cd - > /dev/null
+    rm -rf "$RASPIOS_WORK_DIR"
+    
+    echo "✅ RaspberryPi OS extraction complete"
+    return 0
 }
 
 # Create a fallback boot setup if download fails
@@ -272,19 +330,12 @@ fi
 # NOW SETUP RASPBERRYPI OS BOOT AND MODULES
 # =====================================================
 
-echo "🔧 Setting up RaspberryPi OS boot partition..."
-# Try to get complete RaspberryPi OS boot
-if setup_raspios_boot "mnt/boot"; then
-    echo "✅ RaspberryPi OS boot setup successful"
-    
-    # Now that Alpine rootfs is installed, add the RaspberryPi OS modules
-    if setup_raspios_modules "mnt/root-a" "mnt/root-b"; then
-        echo "✅ RaspberryPi OS modules setup successful"
-    else
-        echo "⚠️  Module setup failed, but boot files are good"
-    fi
+echo "🔧 Setting up RaspberryPi OS boot partition and modules..."
+# Download once, extract both boot files and modules
+if download_and_extract_raspios "mnt/boot" "mnt/root-a" "mnt/root-b"; then
+    echo "✅ RaspberryPi OS setup successful"
 else
-    echo "⚠️  RaspberryPi OS download failed, using fallback"
+    echo "⚠️  RaspberryPi OS extraction failed, using fallback boot"
     setup_fallback_boot "mnt/boot"
 fi
 
