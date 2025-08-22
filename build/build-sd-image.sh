@@ -165,6 +165,7 @@ download_and_extract_raspios() {
     local root_b_dest="$3"
     
     echo "🥧 Downloading and extracting RaspberryPi OS for boot and modules..."
+    echo "🔧 FIXED: Using absolute paths to avoid directory change issues"
     
     # Use a separate working directory to avoid conflicts
     RASPIOS_WORK_DIR="/tmp/raspios-extract-$"
