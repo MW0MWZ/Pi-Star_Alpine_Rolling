@@ -172,8 +172,8 @@ download_and_extract_raspios() {
     mkdir -p "$RASPIOS_WORK_DIR"
     cd "$RASPIOS_WORK_DIR"
     
-    # Download RaspberryPi OS Lite
-    RASPIOS_URL="https://downloads.raspberrypi.org/raspios_lite_armhf/images/raspios_lite_armhf-2024-07-04/2024-07-04-raspios-bookworm-armhf-lite.img.xz"
+    # Download RaspberryPi OS Lite - use the latest version that matches working system
+    RASPIOS_URL="https://downloads.raspberrypi.org/raspios_lite_armhf/images/raspios_lite_armhf-2025-05-13/2025-05-13-raspios-bookworm-armhf-lite.img.xz"
     
     echo "📥 Downloading RaspberryPi OS (this will take a few minutes)..."
     if ! wget -q -O raspios.img.xz "$RASPIOS_URL"; then
