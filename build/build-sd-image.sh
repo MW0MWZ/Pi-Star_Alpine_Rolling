@@ -332,8 +332,15 @@ fi
 # =====================================================
 
 echo "🔧 Setting up RaspberryPi OS boot partition and modules..."
+# Convert relative paths to absolute paths before calling the function
+BOOT_ABS_PATH="$(pwd)/mnt/boot"
+ROOT_A_ABS_PATH="$(pwd)/mnt/root-a" 
+ROOT_B_ABS_PATH="$(pwd)/mnt/root-b"
+
+echo "📍 Absolute paths: boot=$BOOT_ABS_PATH, root-a=$ROOT_A_ABS_PATH, root-b=$ROOT_B_ABS_PATH"
+
 # Download once, extract both boot files and modules
-if download_and_extract_raspios "mnt/boot" "mnt/root-a" "mnt/root-b"; then
+if download_and_extract_raspios "$BOOT_ABS_PATH" "$ROOT_A_ABS_PATH" "$ROOT_B_ABS_PATH"; then
     echo "✅ RaspberryPi OS setup successful"
 else
     echo "⚠️  RaspberryPi OS extraction failed, using fallback boot"
