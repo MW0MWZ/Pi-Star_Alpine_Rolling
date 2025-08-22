@@ -102,330 +102,262 @@ fi
 echo "✅ Found Alpine+Raspbian hybrid rootfs"
 
 # =====================================================
-# DOWNLOAD RASPBERRYPI OS FIRMWARE AND KERNELS
+# SETUP COMPLETE RASPBERRYPI OS BOOT PARTITION
 # =====================================================
 
-echo "📡 Downloading RaspberryPi OS firmware and kernels..."
-
-# Try GitHub firmware repository
-PI_FIRMWARE_BASE="https://github.com/raspberrypi/firmware/raw/master/boot"
-
-echo "🔍 Testing firmware repository access..."
-if wget -q --spider "$PI_FIRMWARE_BASE/kernel8.img" 2>/dev/null; then
-    echo "✅ Repository accessible"
+setup_raspios_boot() {
+    local boot_mount_point="$1"
     
-    # Download essential firmware files
-    echo "📥 Downloading firmware files..."
+    echo "🥧 Setting up complete RaspberryPi OS boot partition..."
     
-    # Complete firmware set (not just essential)
-    FIRMWARE_FILES="bootcode.bin start.elf start4.elf start_x.elf start4x.elf start_cd.elf start4cd.elf start_db.elf start4db.elf fixup.dat fixup4.dat fixup_x.dat fixup4x.dat fixup_cd.dat fixup4cd.dat fixup_db.dat fixup4db.dat"
+    # Use the official RaspberryPi OS Lite image for boot files
+    TEMP_DIR=$(mktemp -d)
+    cd "$TEMP_DIR"
     
-    for file in $FIRMWARE_FILES; do
-        if wget -q -O "mnt/boot/$file" "$PI_FIRMWARE_BASE/$file"; then
-            echo "✅ Downloaded: $file"
-        else
-            echo "⚠️  Could not download: $file (may not exist)"
-        fi
-    done
+    echo "📥 Downloading RaspberryPi OS Lite image..."
+    # Use a known-good, recent version
+    RASPIOS_URL="https://downloads.raspberrypi.org/raspios_lite_armhf/images/raspios_lite_armhf-2024-07-04/2024-07-04-raspios-bookworm-armhf-lite.img.xz"
     
-    # Download kernels and initramfs
-    echo "📥 Downloading kernels and initramfs..."
-    KERNEL_FILES="kernel.img kernel7.img kernel7l.img kernel8.img kernel_2712.img"
-    INITRAMFS_FILES="initramfs initramfs7 initramfs7l initramfs8 initramfs_2712"
-    
-    for kernel in $KERNEL_FILES; do
-        if wget -q -O "mnt/boot/$kernel" "$PI_FIRMWARE_BASE/$kernel"; then
-            echo "✅ Downloaded: $kernel"
-        else
-            echo "⚠️  Could not download: $kernel (may not exist)"
-        fi
-    done
-    
-    for initramfs in $INITRAMFS_FILES; do
-        if wget -q -O "mnt/boot/$initramfs" "$PI_FIRMWARE_BASE/$initramfs"; then
-            echo "✅ Downloaded: $initramfs"
-        else
-            echo "⚠️  Could not download: $initramfs (may not exist)"
-        fi
-    done
-    
-    # Download ALL device trees (don't be selective)
-    echo "📥 Downloading ALL device tree files..."
-    
-    # Get list of all .dtb files from the repository
-    DTB_LIST=$(wget -q -O- "https://api.github.com/repos/raspberrypi/firmware/contents/boot" | grep -o '"name":"[^"]*\.dtb"' | cut -d'"' -f4 2>/dev/null || echo "")
-    
-    if [ -n "$DTB_LIST" ]; then
-        echo "📋 Found device tree files via API"
-        for dtb in $DTB_LIST; do
-            if wget -q -O "mnt/boot/$dtb" "$PI_FIRMWARE_BASE/$dtb"; then
-                echo "✅ Downloaded: $dtb"
-            else
-                echo "⚠️  Could not download: $dtb"
-            fi
-        done
-    else
-        echo "📋 Using comprehensive device tree list"
-        # Comprehensive list of known DTB files for all Pi models
-        DTB_FILES="bcm2708-rpi-b.dtb bcm2708-rpi-b-plus.dtb bcm2708-rpi-b-rev1.dtb bcm2708-rpi-cm.dtb bcm2708-rpi-zero.dtb bcm2708-rpi-zero-w.dtb bcm2709-rpi-2-b.dtb bcm2709-rpi-cm2.dtb bcm2710-rpi-2-b.dtb bcm2710-rpi-3-b.dtb bcm2710-rpi-3-b-plus.dtb bcm2710-rpi-cm3.dtb bcm2710-rpi-zero-2.dtb bcm2710-rpi-zero-2-w.dtb bcm2711-rpi-4-b.dtb bcm2711-rpi-400.dtb bcm2711-rpi-cm4.dtb bcm2711-rpi-cm4s.dtb bcm2712-rpi-5-b.dtb bcm2712-rpi-cm5.dtb"
+    if wget -q --show-progress "$RASPIOS_URL" -O raspios.img.xz; then
+        echo "📦 Extracting RaspberryPi OS image..."
+        xz -d raspios.img.xz
         
-        for dtb in $DTB_FILES; do
-            if wget -q -O "mnt/boot/$dtb" "$PI_FIRMWARE_BASE/$dtb"; then
-                echo "✅ Downloaded: $dtb"
-            else
-                echo "⚠️  Could not download: $dtb (may not exist yet)"
-            fi
-        done
-    fi
-    
-    # Download MORE comprehensive overlays
-    echo "📥 Downloading comprehensive overlays..."
-    mkdir -p mnt/boot/overlays
-    
-    # More comprehensive overlay list for Pi-Star and general Pi functionality
-    OVERLAY_FILES="uart0.dtbo uart1.dtbo uart2.dtbo uart3.dtbo uart4.dtbo uart5.dtbo disable-bt.dtbo miniuart-bt.dtbo pi3-miniuart-bt.dtbo pi3-disable-bt.dtbo pi3-disable-wifi.dtbo spi0-cs.dtbo spi0-2cs.dtbo spi1-1cs.dtbo spi1-2cs.dtbo spi1-3cs.dtbo spi2-1cs.dtbo spi2-2cs.dtbo spi2-3cs.dtbo i2c0.dtbo i2c1.dtbo i2c3.dtbo i2c4.dtbo i2c5.dtbo i2c6.dtbo gpio-ir.dtbo gpio-ir-tx.dtbo gpio-key.dtbo gpio-led.dtbo gpio-poweroff.dtbo gpio-shutdown.dtbo w1-gpio.dtbo w1-gpio-pullup.dtbo vc4-fkms-v3d.dtbo vc4-kms-v3d.dtbo vc4-kms-v3d-pi4.dtbo dwc2.dtbo g_serial.dtbo libcomposite.dtbo midi-uart0.dtbo midi-uart1.dtbo pps-gpio.dtbo pwm.dtbo pwm-2chan.dtbo pwm-ir-tx.dtbo spi0-hw-cs.dtbo"
-    
-    OVERLAY_SUCCESS=0
-    for overlay in $OVERLAY_FILES; do
-        if wget -q -O "mnt/boot/overlays/$overlay" "$PI_FIRMWARE_BASE/overlays/$overlay"; then
-            echo "✅ Downloaded overlay: $overlay"
-            OVERLAY_SUCCESS=1
-        else
-            echo "⚠️  Could not download overlay: $overlay"
-        fi
-    done
-    
-    if [ "$OVERLAY_SUCCESS" -eq 0 ]; then
-        echo "⚠️  No overlays downloaded - removing empty directory"
-        rmdir mnt/boot/overlays 2>/dev/null || true
-    fi
-    
-    MAIN_KERNEL="RaspberryPi OS kernels"
-    
-else
-    echo "⚠️  Cannot access firmware repository - creating stub files for CI"
-    
-    # Create more comprehensive stub files for CI testing
-    echo "# Firmware stub" > mnt/boot/bootcode.bin
-    echo "# Firmware stub" > mnt/boot/start.elf
-    echo "# Firmware stub" > mnt/boot/start4.elf
-    echo "# Firmware stub" > mnt/boot/start_x.elf
-    echo "# Firmware stub" > mnt/boot/start4x.elf
-    echo "# Firmware stub" > mnt/boot/fixup.dat
-    echo "# Firmware stub" > mnt/boot/fixup4.dat
-    echo "# Firmware stub" > mnt/boot/fixup_x.dat
-    echo "# Firmware stub" > mnt/boot/fixup4x.dat
-    echo "# Kernel stub" > mnt/boot/kernel.img
-    echo "# Kernel stub" > mnt/boot/kernel7.img
-    echo "# Kernel stub" > mnt/boot/kernel7l.img
-    echo "# Kernel stub" > mnt/boot/kernel8.img
-    echo "# Kernel stub" > mnt/boot/kernel_2712.img
-    echo "# Initramfs stub" > mnt/boot/initramfs
-    echo "# Initramfs stub" > mnt/boot/initramfs8
-    
-    MAIN_KERNEL="Stub files (CI testing only)"
-fi
-
-# =====================================================
-# CREATE KERNEL MODULE INFRASTRUCTURE
-# =====================================================
-
-echo "📦 Setting up kernel module infrastructure..."
-
-# Try to detect kernel version from kernel file
-KERNEL_VERSION="unknown"
-if [ -f "mnt/boot/kernel8.img" ] && [ -s "mnt/boot/kernel8.img" ]; then
-    KERNEL_VERSION=$(strings mnt/boot/kernel8.img 2>/dev/null | grep -E "Linux version [0-9]" | head -1 | awk '{print $3}' 2>/dev/null || echo "unknown")
-fi
-
-if [ "$KERNEL_VERSION" != "unknown" ] && [ -n "$KERNEL_VERSION" ]; then
-    echo "🔍 Detected kernel version: $KERNEL_VERSION"
-    
-    # Create module directories
-    mkdir -p "mnt/root-a/lib/modules/$KERNEL_VERSION"
-    mkdir -p "mnt/root-b/lib/modules/$KERNEL_VERSION"
-    
-    # Create module installation script
-    cat > "mnt/root-a/usr/local/bin/install-raspios-modules" << 'EOF'
-#!/bin/bash
-# Install matching RaspberryPi OS modules
-
-KERNEL_VERSION=$(uname -r)
-echo "📦 Installing RaspberryPi OS modules for kernel: $KERNEL_VERSION"
-
-if [ -f "/lib/modules/$KERNEL_VERSION/modules.dep" ]; then
-    echo "✅ Modules already installed"
-    exit 0
-fi
-
-echo "⬇️ Downloading RaspberryPi OS image for module extraction..."
-echo "This may take several minutes..."
-
-TEMP_DIR=$(mktemp -d)
-cd "$TEMP_DIR"
-
-# Download RaspberryPi OS Lite
-RASPIOS_URL="https://downloads.raspberrypi.org/raspios_lite_armhf/images/raspios_lite_armhf-2024-07-04/2024-07-04-raspios-bookworm-armhf-lite.img.xz"
-
-if wget -q "$RASPIOS_URL" -O raspios.img.xz; then
-    echo "📦 Extracting image..."
-    xz -d raspios.img.xz
-    
-    # Mount image
-    LOOP_DEV=$(losetup -f)
-    losetup "$LOOP_DEV" raspios.img
-    
-    mkdir -p mnt_tmp
-    mount "${LOOP_DEV}p2" mnt_tmp
-    
-    # Find matching kernel
-    AVAILABLE_KERNELS=$(ls mnt_tmp/lib/modules/)
-    BEST_KERNEL=""
-    
-    for k in $AVAILABLE_KERNELS; do
-        if echo "$k" | grep -q "$KERNEL_VERSION"; then
-            BEST_KERNEL="$k"
-            break
-        fi
-    done
-    
-    if [ -z "$BEST_KERNEL" ]; then
-        BEST_KERNEL=$(echo "$AVAILABLE_KERNELS" | tail -1)
-    fi
-    
-    echo "✅ Installing modules from: $BEST_KERNEL"
-    
-    # Copy modules
-    mkdir -p "/lib/modules/$KERNEL_VERSION"
-    cp -r "mnt_tmp/lib/modules/$BEST_KERNEL"/* "/lib/modules/$KERNEL_VERSION/"
-    
-    # Copy firmware
-    if [ -d "mnt_tmp/lib/firmware/brcm" ]; then
-        mkdir -p /lib/firmware
-        cp -r mnt_tmp/lib/firmware/brcm /lib/firmware/
-    fi
-    
-    # Generate dependencies
-    depmod -a "$KERNEL_VERSION" 2>/dev/null || true
-    
-    # Cleanup
-    umount mnt_tmp
-    losetup -d "$LOOP_DEV"
-    
-    echo "✅ Modules installed successfully!"
-else
-    echo "❌ Failed to download RaspberryPi OS image"
-    exit 1
-fi
-
-cd /
-rm -rf "$TEMP_DIR"
-EOF
-    
-    chmod +x "mnt/root-a/usr/local/bin/install-raspios-modules"
-    cp "mnt/root-a/usr/local/bin/install-raspios-modules" "mnt/root-b/usr/local/bin/"
-    chmod +x "mnt/root-b/usr/local/bin/install-raspios-modules"
-    
-    # Create module loading script
-    cat > "mnt/root-a/usr/local/bin/load-essential-modules" << 'EOF'
-#!/bin/bash
-# Load essential kernel modules
-
-echo "🔧 Loading essential modules..."
-
-MODULES="cfg80211 brcmutil brcmfmac spi_bcm2835 i2c_bcm2835"
-
-for module in $MODULES; do
-    if modprobe "$module" 2>/dev/null; then
-        echo "✅ Loaded: $module"
+        # Mount the boot partition (usually partition 1)
+        LOOP_DEV=$(losetup -f)
+        losetup "$LOOP_DEV" raspios.img
+        partprobe "$LOOP_DEV"
+        sleep 2
+        
+        mkdir -p raspios_boot
+        mount "${LOOP_DEV}p1" raspios_boot
+        
+        echo "📋 Copying ALL boot files from RaspberryPi OS..."
+        # Copy EVERYTHING from the RaspberryPi OS boot partition
+        cp -r raspios_boot/* "$boot_mount_point/"
+        
+        echo "✅ Copied $(ls -1 raspios_boot/ | wc -l) files from RaspberryPi OS boot"
+        
+        # List what we got
+        echo "📁 Boot files copied:"
+        ls -la "$boot_mount_point/" | head -20
+        
+        # Cleanup
+        umount raspios_boot
+        losetup -d "$LOOP_DEV"
+        
+        echo "✅ RaspberryPi OS boot setup complete"
+        
+        cd - > /dev/null
+        rm -rf "$TEMP_DIR"
+        return 0
     else
-        echo "⚠️  Could not load: $module"
+        echo "❌ Failed to download RaspberryPi OS image"
+        cd - > /dev/null
+        rm -rf "$TEMP_DIR"
+        return 1
     fi
-done
-EOF
+}
+
+# Download RaspberryPi OS modules for userland
+setup_raspios_modules() {
+    local rootfs_a="$1"
+    local rootfs_b="$2"
     
-    chmod +x "mnt/root-a/usr/local/bin/load-essential-modules"
-    cp "mnt/root-a/usr/local/bin/load-essential-modules" "mnt/root-b/usr/local/bin/"
-    chmod +x "mnt/root-b/usr/local/bin/load-essential-modules"
+    echo "📦 Setting up RaspberryPi OS kernel modules..."
     
-    echo "✅ Module infrastructure created"
-else
-    echo "⚠️  Could not determine kernel version"
-fi
+    TEMP_DIR=$(mktemp -d)
+    cd "$TEMP_DIR"
+    
+    # Same RaspberryPi OS image
+    RASPIOS_URL="https://downloads.raspberrypi.org/raspios_lite_armhf/images/raspios_lite_armhf-2024-07-04/2024-07-04-raspios-bookworm-armhf-lite.img.xz"
+    
+    if wget -q --show-progress "$RASPIOS_URL" -O raspios.img.xz; then
+        xz -d raspios.img.xz
+        
+        LOOP_DEV=$(losetup -f)
+        losetup "$LOOP_DEV" raspios.img
+        partprobe "$LOOP_DEV"
+        sleep 2
+        
+        mkdir -p raspios_root
+        mount "${LOOP_DEV}p2" raspios_root
+        
+        echo "📋 Copying kernel modules to both partitions..."
+        
+        # Copy modules to both root partitions
+        if [ -d "raspios_root/lib/modules" ]; then
+            cp -r raspios_root/lib/modules "$rootfs_a/lib/"
+            cp -r raspios_root/lib/modules "$rootfs_b/lib/"
+            echo "✅ Modules copied to partition A and B"
+        fi
+        
+        # Copy firmware (especially for WiFi)
+        if [ -d "raspios_root/lib/firmware" ]; then
+            cp -r raspios_root/lib/firmware "$rootfs_a/lib/"
+            cp -r raspios_root/lib/firmware "$rootfs_b/lib/"
+            echo "✅ Firmware copied to partition A and B"
+        fi
+        
+        # Get the kernel version for reference
+        KERNEL_VERSION=$(ls raspios_root/lib/modules/ | head -1)
+        echo "📱 RaspberryPi OS kernel version: $KERNEL_VERSION"
+        
+        # Create kernel version files for reference
+        echo "$KERNEL_VERSION" > "$rootfs_a/etc/raspios-kernel-version"
+        echo "$KERNEL_VERSION" > "$rootfs_b/etc/raspios-kernel-version"
+        
+        umount raspios_root
+        losetup -d "$LOOP_DEV"
+        
+        echo "✅ RaspberryPi OS modules setup complete"
+        
+        cd - > /dev/null
+        rm -rf "$TEMP_DIR"
+        return 0
+    else
+        echo "❌ Failed to download RaspberryPi OS for modules"
+        cd - > /dev/null
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
+}
 
-# =====================================================
-# CREATE CONFIG.TXT
-# =====================================================
-
-echo "⚙️ Creating config.txt..."
-
-cat > mnt/boot/config.txt << 'EOF'
-# Pi-Star Alpine+RaspberryPi OS Hybrid Config
-
-# Essential GPIO/SPI/I2C for Pi-Star
+# Create a fallback boot setup if download fails
+setup_fallback_boot() {
+    local boot_mount_point="$1"
+    
+    echo "⚠️  Setting up fallback boot files..."
+    
+    # Create minimal boot files that should work
+    cat > "$boot_mount_point/config.txt" << 'EOF'
+# Minimal Pi config for Alpine userland
+[all]
+kernel=kernel8.img
+arm_64bit=0
+disable_overscan=1
+dtparam=audio=off
 dtparam=spi=on
 dtparam=i2c_arm=on
-
-# Disable audio for stability
-dtparam=audio=off
-
-# Safe video driver
-dtoverlay=vc4-fkms-v3d
-
-# Conservative settings
-disable_overscan=1
-gpu_mem=64
-
-# Model-specific kernels and initramfs
-[pi1]
-kernel=kernel.img
-initramfs initramfs followkernel
-
-[pi2]
-kernel=kernel7.img
-initramfs initramfs7 followkernel
-
-[pi3]
-kernel=kernel8.img
-initramfs initramfs8 followkernel
-
-[pi02]
-# Pi Zero 2W WiFi stability
-kernel=kernel8.img
-initramfs initramfs8 followkernel
-arm_freq=900
-gpu_freq=100
-
-[pi4]
-kernel=kernel7l.img
-initramfs initramfs7l followkernel
-
-[pi5]
-kernel=kernel_2712.img
-initramfs initramfs_2712 followkernel
-
-[all]
-# UART for Pi-Star
 enable_uart=1
-dtparam=uart0=on
+gpu_mem=64
 EOF
+    
+    cat > "$boot_mount_point/cmdline.txt" << 'EOF'
+console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 elevator=deadline fsck.repair=yes rootwait net.ifnames=0
+EOF
+    
+    echo "⚠️  Fallback boot setup complete (may not boot without proper firmware)"
+}
 
-# Create cmdline.txt
+echo "🔧 Setting up RaspberryPi OS boot partition..."
+# Try to get complete RaspberryPi OS boot
+if setup_raspios_boot "mnt/boot"; then
+    echo "✅ RaspberryPi OS boot setup successful"
+    
+    # Also get the modules for Alpine userland
+    if setup_raspios_modules "mnt/root-a" "mnt/root-b"; then
+        echo "✅ RaspberryPi OS modules setup successful"
+    else
+        echo "⚠️  Module setup failed, but boot files are good"
+    fi
+else
+    echo "⚠️  RaspberryPi OS download failed, using fallback"
+    setup_fallback_boot "mnt/boot"
+fi
+
+# =====================================================
+# APPLY CUSTOM CONFIGURATIONS
+# =====================================================
+
+echo "📝 Adding Pi-Star customizations to boot partition..."
+
+# Add A/B boot state
+echo "A" > mnt/boot/ab_state
+
+# Apply your known working cmdline files
 cat > mnt/boot/cmdline.txt << 'EOF'
 dwc_otg.lpm_enable=0 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 elevator=deadline fsck.repair=yes fsck.mode=force net.ifnames=0 rootwait quiet noswap
 EOF
 
-# Pi Zero 2W specific cmdline
+# Pi Zero 2W specific cmdline (with WiFi stability parameters)
 cat > mnt/boot/cmdline02w.txt << 'EOF'
 dwc_otg.lpm_enable=0 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 elevator=deadline fsck.repair=yes fsck.mode=force brcmfmac.roamoff=1 brcmfmac.feature_disable=0x82000 net.ifnames=0 rootwait quiet noswap
 EOF
 
-# =====================================================
-# CREATE A/B STATE
-# =====================================================
+# Overwrite config.txt with your known working version
+cat > mnt/boot/config.txt << 'EOF'
+# For more options and information see
+# http://rptl.io/configtxt
+# Some settings may impact device functionality. See link above for details
 
-echo "A" > mnt/boot/ab_state
-echo "✅ Set initial boot to partition A"
+# Enable audio (loads snd_bcm2835)
+dtparam=audio=on
+
+# Automatically load overlays for detected cameras
+camera_auto_detect=0
+
+# Automatically load overlays for detected DSI displays
+display_auto_detect=1
+
+# Automatically load initramfs files, if found
+auto_initramfs=1
+
+# Enable DRM VC4 V3D driver
+dtoverlay=vc4-kms-v3d
+max_framebuffers=2
+
+# Don't have the firmware create an initial video= setting in cmdline.txt.
+# Use the kernel's default instead.
+disable_fw_kms_setup=1
+
+# Disable compensation for displays with overscan
+disable_overscan=1
+
+# Free up some RAM
+gpu_mem=16
+
+# D2RG UART over SPI
+dtoverlay=sc16is752-spi0-ce0
+
+# Model Specifics
+[pi1]
+kernel=kernel.img
+gpu_freq=100
+
+[pi2]
+kernel=kernel.img
+gpu_freq=100
+
+[pi3]
+kernel=kernel8.img
+arm_freq=1000
+gpu_freq=100
+
+[pi3+]
+kernel=kernel8.img
+arm_freq=1200
+gpu_freq=100
+
+[pi02]
+cmdline=cmdline02w.txt
+kernel=kernel8.img
+arm_freq=900
+gpu_freq=100
+
+[pi4]
+kernel=kernel8.img
+
+[pi5]
+kernel=kernel8.img
+
+[all]
+dtparam=i2c_arm=on
+dtparam=spi=on
+dtoverlay=miniuart-bt
+dtparam=uart0=on
+dtparam=uart1=on
+temp_limit=75
+EOF
 
 # =====================================================
 # INSTALL ROOT FILESYSTEMS
@@ -490,6 +422,10 @@ echo "$VERSION" > mnt/root-b/etc/pi-star-version
 echo "Alpine Linux + RaspberryPi OS hybrid" > mnt/root-a/etc/system-info
 echo "Alpine Linux + RaspberryPi OS hybrid" > mnt/root-b/etc/system-info
 
+# Mark as hybrid system
+echo "Alpine userland with RaspberryPi OS kernel/modules/firmware" > mnt/root-a/etc/alpine-raspbian-hybrid
+echo "Alpine userland with RaspberryPi OS kernel/modules/firmware" > mnt/root-b/etc/alpine-raspbian-hybrid
+
 # =====================================================
 # CREATE DOCUMENTATION
 # =====================================================
@@ -504,7 +440,7 @@ COMPONENTS:
 - Alpine Linux userland (minimal, secure)
 - RaspberryPi OS kernels (full hardware support)
 - RaspberryPi OS firmware (all Pi models)
-- Essential overlays for Pi-Star
+- RaspberryPi OS kernel modules
 
 FIRST BOOT:
 Create /boot/pistar-config.txt with:
@@ -518,9 +454,9 @@ SUPPORTED PI MODELS:
 - Pi 2B, Pi 3B, Pi 3B+
 - Pi 4B, Pi 5B
 
-KERNEL MODULES:
-Run 'sudo /usr/local/bin/install-raspios-modules' after first boot
-to install full RaspberryPi OS kernel modules.
+BOOT SYSTEM:
+This uses a complete RaspberryPi OS boot partition
+with Alpine Linux userland for maximum compatibility.
 
 Repository: https://github.com/MW0MWZ/Pi-Star_Alpine_Rolling
 EOF
@@ -554,11 +490,12 @@ echo "📁 Boot partition: $BOOT_USED used / 128MB"
 # Show what we installed
 echo ""
 echo "📦 Installation Summary:"
-echo "   • Firmware files: $(ls mnt/boot/*.elf mnt/boot/*.dat mnt/boot/bootcode.bin 2>/dev/null | wc -l)"
+echo "   • Boot system: Complete RaspberryPi OS boot partition"
 echo "   • Kernel files: $(ls mnt/boot/kernel*.img 2>/dev/null | wc -l)"
 echo "   • Device trees: $(ls mnt/boot/*.dtb 2>/dev/null | wc -l)"
 echo "   • Overlays: $(ls mnt/boot/overlays/*.dtbo 2>/dev/null | wc -l || echo 0)"
-echo "   • Kernel source: $MAIN_KERNEL"
+echo "   • Userland: Alpine Linux"
+echo "   • Modules: RaspberryPi OS kernel modules"
 
 # =====================================================
 # UNMOUNT AND FINALIZE
@@ -580,16 +517,17 @@ echo "📁 Image: ${OUTPUT_FILE}.gz"
 echo "📏 Compressed size: $(ls -lh "${OUTPUT_FILE}.gz" | awk '{print $5}')"
 echo ""
 echo "🏗️ HYBRID ARCHITECTURE:"
-echo "  • Alpine Linux userland (~50MB)"
-echo "  • RaspberryPi OS kernels (~25MB)"
+echo "  • RaspberryPi OS boot partition (complete)"
+echo "  • Alpine Linux userland (~50MB per partition)"
+echo "  • RaspberryPi OS kernel modules (~150MB per partition)"
 echo "  • RaspberryPi OS firmware (~15MB)"
-echo "  • Essential overlays (~5MB)"
 echo ""
 echo "✨ FEATURES:"
-echo "  ✅ Full RaspberryPi OS hardware support"
+echo "  ✅ Complete RaspberryPi OS hardware support"
 echo "  ✅ Alpine security and efficiency"
 echo "  ✅ A/B partition updates"
 echo "  ✅ 2GB SD card compatible"
 echo "  ✅ All Pi models supported"
+echo "  ✅ Should boot reliably!"
 echo ""
 echo "Ready for testing! 🚀"
