@@ -452,14 +452,14 @@ mkdir -p mnt/data/database
 mkdir -p mnt/data/backup
 
 # =====================================================
-# CREATE FSTAB
+# CREATE FSTAB WITH /boot/firmware MOUNT
 # =====================================================
 
 create_fstab() {
     local root_dir="$1"
     cat > "${root_dir}/etc/fstab" << 'EOF'
-# Pi-Star A/B Partition Layout
-LABEL=PISTAR_BOOT     /boot           vfat    defaults,noatime                    0 2
+# Pi-Star A/B Partition Layout with RaspberryPi OS hardware layer
+LABEL=PISTAR_BOOT     /boot/firmware  vfat    defaults,noatime                    0 2
 LABEL=PISTAR_DATA     /opt/pistar     ext4    defaults,noatime                    0 2
 
 # Bind mounts for Pi-Star integration

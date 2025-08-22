@@ -7,6 +7,7 @@ BUILD_DIR="${BUILD_DIR:-/tmp/pi-star-build}"
 CACHE_DIR="${CACHE_DIR:-/tmp/alpine-cache}"
 
 echo "🚀 Building Pi-Star Alpine rootfs v${VERSION} (mode: ${PI_STAR_MODE})"
+echo "🔧 PURE ALPINE USERLAND - No kernel packages (RaspberryPi OS provides hardware layer)"
 
 # Create build environment
 mkdir -p "$BUILD_DIR"
@@ -59,9 +60,9 @@ apk add --no-cache alpine-base busybox >/dev/null 2>&1
 /bin/busybox --install -s >/dev/null 2>&1
 CHROOT_SETUP
 
-echo "📱 Installing Alpine packages..."
+echo "📱 Installing Alpine userland packages (NO KERNEL PACKAGES)..."
 sudo chroot . /bin/sh << 'CHROOT_PACKAGES'
-# Core system packages
+# Core system packages (NO kernel packages)
 apk add --no-cache \
     alpine-base \
     openrc \
@@ -79,65 +80,14 @@ apk add --no-cache \
     curl \
     wget >/dev/null 2>&1
 
-# Pi kernel and firmware
-apk add --no-cache \
-    linux-rpi \
-    raspberrypi-bootloader >/dev/null 2>&1
-
-# Install device tree compiler if available
-apk add --no-cache device-tree-compiler >/dev/null 2>&1 || true
+# NOTE: NOT installing linux-rpi or raspberrypi-bootloader
+# RaspberryPi OS provides complete hardware layer
+echo "✅ Pure Alpine userland installed (no kernel packages)"
 CHROOT_PACKAGES
 
-# Export kernel files
-echo "🔄 Exporting Alpine kernel files..."
-sudo chroot . /bin/sh << 'CHROOT_KERNEL_EXPORT'
-# Create kernel export directory
-mkdir -p /tmp/kernel-export
-
-# Export kernel files
-KERNEL_FOUND=false
-if ls /boot/vmlinuz-* >/dev/null 2>&1; then
-    cp /boot/vmlinuz-* /tmp/kernel-export/
-    KERNEL_FOUND=true
-fi
-
-if ls /boot/initramfs-* >/dev/null 2>&1; then
-    cp /boot/initramfs-* /tmp/kernel-export/
-fi
-
-# Export module information
-if [ -d /lib/modules ]; then
-    ls /lib/modules > /tmp/kernel-export/module-versions.txt
-fi
-
-if [ "$KERNEL_FOUND" != "true" ]; then
-    echo "no_kernel_found" > /tmp/kernel-export/download_needed.txt
-fi
-CHROOT_KERNEL_EXPORT
-
-# Copy exported kernel files
-if [ -d "$BUILD_DIR/rootfs/tmp/kernel-export" ]; then
-    mkdir -p "$BUILD_DIR/kernel-files"
-    if ls "$BUILD_DIR/rootfs/tmp/kernel-export"/* >/dev/null 2>&1; then
-        cp "$BUILD_DIR/rootfs/tmp/kernel-export"/* "$BUILD_DIR/kernel-files/"
-        mkdir -p "$BUILD_DIR/rootfs/boot"
-        if ls "$BUILD_DIR/kernel-files"/vmlinuz-* >/dev/null 2>&1; then
-            cp "$BUILD_DIR/kernel-files"/vmlinuz-* "$BUILD_DIR/rootfs/boot/"
-        fi
-        if ls "$BUILD_DIR/kernel-files"/initramfs-* >/dev/null 2>&1; then
-            cp "$BUILD_DIR/kernel-files"/initramfs-* "$BUILD_DIR/rootfs/boot/"
-        fi
-    else
-        echo "no_kernel_found" > "$BUILD_DIR/kernel-files/download_needed.txt"
-    fi
-else
-    mkdir -p "$BUILD_DIR/kernel-files"
-    echo "no_kernel_found" > "$BUILD_DIR/kernel-files/download_needed.txt"
-fi
-
-echo "📶 Configuring WiFi drivers..."
+echo "📶 Configuring WiFi drivers (using RaspberryPi OS modules)..."
 sudo tee etc/modprobe.d/brcmfmac.conf << 'EOF' >/dev/null
-# Pi wireless configuration
+# Pi wireless configuration (modules provided by RaspberryPi OS)
 options brcmfmac roamoff=1 feature_disable=0x282000
 
 # Disable Bluetooth for resource savings
@@ -149,7 +99,7 @@ blacklist bluetooth
 EOF
 
 sudo tee etc/modules-load.d/pi-wireless.conf << 'EOF' >/dev/null
-# WiFi modules for Pi
+# WiFi modules for Pi (provided by RaspberryPi OS /lib/modules/)
 brcmfmac
 brcmutil
 cfg80211
@@ -249,8 +199,8 @@ sudo tee usr/local/bin/process-boot-config << 'BOOT_CONFIG_SCRIPT' >/dev/null
 #!/bin/bash
 set -e
 
-CONFIG_FILE="/boot/pistar-config.txt"
-PROCESSED_FLAG="/boot/.config-processed"
+CONFIG_FILE="/boot/firmware/pistar-config.txt"
+PROCESSED_FLAG="/boot/firmware/.config-processed"
 DEBUG_LOG="/var/log/boot-config.log"
 
 mkdir -p /var/log
@@ -369,10 +319,6 @@ fi
 echo "$VERSION" | sudo tee etc/pi-star-version >/dev/null
 
 # Configure system files
-if [ -f "$REPO_ROOT/config/system/fstab" ]; then
-    sudo cp "$REPO_ROOT/config/system/fstab" etc/fstab
-fi
-
 if [ -f "$REPO_ROOT/config/system/hostname" ]; then
     sudo cp "$REPO_ROOT/config/system/hostname" etc/hostname
 fi
@@ -393,8 +339,8 @@ depend() {
 start() {
     ebegin "Processing Pi-Star boot configuration"
     
-    if ! mountpoint -q /boot 2>/dev/null; then
-        mount /boot 2>/dev/null || true
+    if ! mountpoint -q /boot/firmware 2>/dev/null; then
+        mount /boot/firmware 2>/dev/null || true
     fi
     
     mkdir -p /var/log
@@ -411,7 +357,7 @@ sudo tee etc/init.d/alpine-pi-setup << 'SERVICE_PI_SETUP' >/dev/null
 #!/sbin/openrc-run
 
 name="Alpine Pi Setup"
-description="Pi hardware setup for Alpine"
+description="Pi hardware setup for Alpine with RaspberryPi OS modules"
 
 depend() {
     after localmount modules
@@ -419,12 +365,14 @@ depend() {
 }
 
 start() {
-    ebegin "Setting up Alpine for Pi hardware"
+    ebegin "Setting up Alpine for Pi hardware (using RaspberryPi OS modules)"
     
+    # Load RaspberryPi OS modules
     modprobe brcmfmac 2>/dev/null || true
     modprobe brcmutil 2>/dev/null || true
     modprobe cfg80211 2>/dev/null || true
     
+    # Disable bluetooth
     rmmod btbcm 2>/dev/null || true
     rmmod hci_uart 2>/dev/null || true
     rmmod bluetooth 2>/dev/null || true
@@ -497,31 +445,31 @@ echo "🔧 Creating first-boot setup script..."
 sudo tee usr/local/bin/first-boot-setup << 'FIRST_BOOT_SCRIPT' >/dev/null
 #!/bin/bash
 
-echo "Pi-Star Alpine First Boot Setup"
-echo "==============================="
+echo "Pi-Star Alpine + RaspberryPi OS Hybrid First Boot Setup"
+echo "======================================================"
 
-if [ -f "/boot/.config-processed" ]; then
+if [ -f "/boot/firmware/.config-processed" ]; then
     echo "✅ Boot configuration processed automatically"
     
-    if [ -f "/boot/pistar-config.txt" ]; then
+    if [ -f "/boot/firmware/pistar-config.txt" ]; then
         echo ""
         echo "Configuration applied:"
         
-        if grep -q "^wifi_ssid" /boot/pistar-config.txt 2>/dev/null; then
-            WIFI_SSID=$(grep "^wifi_ssid" /boot/pistar-config.txt | head -1 | cut -d'=' -f2)
+        if grep -q "^wifi_ssid" /boot/firmware/pistar-config.txt 2>/dev/null; then
+            WIFI_SSID=$(grep "^wifi_ssid" /boot/firmware/pistar-config.txt | head -1 | cut -d'=' -f2)
             echo "• WiFi: Configured for '$WIFI_SSID'"
         fi
         
-        if grep -q "^user_password" /boot/pistar-config.txt 2>/dev/null; then
+        if grep -q "^user_password" /boot/firmware/pistar-config.txt 2>/dev/null; then
             echo "• User: Password set for pi-star user"
         fi
         
-        if grep -q "^ssh_key" /boot/pistar-config.txt 2>/dev/null; then
+        if grep -q "^ssh_key" /boot/firmware/pistar-config.txt 2>/dev/null; then
             echo "• SSH: Public key authentication configured"
         fi
         
-        if grep -q "^hostname" /boot/pistar-config.txt 2>/dev/null; then
-            CONFIGURED_HOSTNAME=$(grep "^hostname" /boot/pistar-config.txt | cut -d'=' -f2)
+        if grep -q "^hostname" /boot/firmware/pistar-config.txt 2>/dev/null; then
+            CONFIGURED_HOSTNAME=$(grep "^hostname" /boot/firmware/pistar-config.txt | cut -d'=' -f2)
             echo "• Hostname: Set to '$CONFIGURED_HOSTNAME'"
         fi
     fi
@@ -529,14 +477,14 @@ if [ -f "/boot/.config-processed" ]; then
     echo ""
     echo "✅ System fully configured automatically"
 else
-    echo "ℹ️  No boot configuration found at /boot/pistar-config.txt"
+    echo "ℹ️  No boot configuration found at /boot/firmware/pistar-config.txt"
     echo ""
     echo "SECURITY NOTICE:"
     echo "• Root account: DISABLED"
     echo "• pi-star user: No password set (SSH key required)"
     echo "• SSH: Key authentication only"
     echo ""
-    echo "Create /boot/pistar-config.txt with your settings before rebooting!"
+    echo "Create /boot/firmware/pistar-config.txt with your settings before rebooting!"
 fi
 
 if [ -f "/usr/local/bin/boot-validator" ]; then
@@ -551,9 +499,11 @@ touch /opt/pistar/.first-boot-complete
 echo ""
 echo "SYSTEM STATUS:"
 echo "• Hostname: $(hostname)"
-echo "• Active partition: $(cat /boot/ab_state 2>/dev/null || echo 'Unknown')"
+echo "• Active partition: $(cat /boot/firmware/ab_state 2>/dev/null || echo 'Unknown')"
 echo "• Pi-Star version: $(cat /etc/pi-star-version 2>/dev/null || echo 'Unknown')"
 echo "• Kernel: $(uname -r)"
+echo "• Hardware layer: RaspberryPi OS"
+echo "• Userland: Alpine Linux"
 
 if command -v ip >/dev/null 2>&1; then
     echo "• Network interfaces:"
@@ -576,7 +526,7 @@ else
 fi
 
 echo ""
-echo "Pi-Star Alpine first boot complete!"
+echo "Pi-Star Alpine + RaspberryPi OS hybrid first boot complete!"
 FIRST_BOOT_SCRIPT
 
 sudo chmod +x usr/local/bin/first-boot-setup
@@ -590,10 +540,12 @@ sudo rm -f usr/bin/qemu-arm-static
 sudo umount proc sys dev 2>/dev/null
 
 echo ""
-echo "✅ Alpine rootfs build complete!"
+echo "✅ Pure Alpine userland build complete!"
 echo "📁 Version: $VERSION"
 echo "🔧 Mode: $PI_STAR_MODE"
 echo "📦 Size: $(du -sh . | cut -f1)"
+echo "🏗️ Hardware layer: RaspberryPi OS (added separately)"
+echo "🐧 Userland: Pure Alpine Linux"
 
 # Final verification
 ESSENTIAL_FILES=(
@@ -619,16 +571,5 @@ else
     echo "⚠️  $MISSING_FILES essential files missing"
 fi
 
-# Kernel verification
-if [ -d "$BUILD_DIR/kernel-files" ]; then
-    echo "✅ Kernel files exported for SD image build"
-    if ls "$BUILD_DIR/kernel-files"/vmlinuz-* >/dev/null 2>&1; then
-        KERNEL_VERSION=$(basename "$BUILD_DIR/kernel-files"/vmlinuz-* | sed 's/vmlinuz-//')
-        echo "📱 Alpine kernel: $KERNEL_VERSION"
-    fi
-else
-    echo "⚠️  No kernel files exported"
-fi
-
 echo ""
-echo "🎉 Build complete - ready for packaging!"
+echo "🎉 Pure Alpine userland ready for RaspberryPi OS hardware layer!"
